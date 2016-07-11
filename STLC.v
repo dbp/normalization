@@ -51,7 +51,7 @@ Reserved Notation "Γ '|-' e" (at level 10).
 Inductive has_type : tyenv -> exp -> ty -> Prop :=
 | TConst : forall Γ b, has_type Γ (Const b) Bool
 | TVar : forall Γ x t, lookup Γ x = Some t -> has_type Γ (Var x) t
-| TAbs : forall Γ x e t t', has_type (extend Γ x t) e t' ->
+| TAbs : forall Γ x e t t', has_type (extend (drop x Γ) x t) e t' ->
                        has_type Γ (Abs x e) (Fun t t')
 | TApp : forall Γ e e' t1 t2, has_type Γ e (Fun t1 t2) ->
                          has_type Γ e' t1 ->
@@ -378,6 +378,11 @@ Proof.
   eauto.
 Qed.
 
+Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
+                      x <> y ->
+                      lookup (drop x Γ) y = lookup Γ y.
+Admitted.
+
 Lemma free_in_context : forall x e t Γ,
                           free_in x e ->
                           Γ |- e t ->
@@ -387,7 +392,7 @@ Proof.
   induction H0; inversion H; subst; eauto.
   destruct IHhas_type; eauto.
   exists x1. simpl in H1. rewrite string_dec_ne in H1.
-  eauto.
+  rewrite lookup_drop in H1; eauto.
   eauto.
 Qed.
 
@@ -777,6 +782,16 @@ Proof.
 
 Qed.
 
+Lemma extend_drop'' : forall Γ x t t' e,
+                        (extend (drop x Γ) x t) |- e t' =
+                        (extend Γ x t) |- e t'.
+Admitted.
+
+Lemma drop_fulfills : forall Γ Σ x,
+                        Γ |= Σ ->
+                        drop x Γ |= drop x Σ.
+Admitted.
+
 Theorem fundamental : forall e t Γ Σ,
                         Γ |- e t ->
                             Γ |= Σ ->
@@ -791,7 +806,9 @@ Proof.
   eapply TVar_compat; eauto.
 
   eapply TAbs_compat; eauto.
-  intros. eapply IHhas_type. rewrite extend_drop'. eapply FCons; eauto.
+  rewrite extend_drop'' in H. eauto.
+  intros. eapply IHhas_type. eapply FCons; eauto.
+  eapply drop_fulfills; eauto.
 
   eapply TApp_compat; eauto.
 
