@@ -547,13 +547,14 @@ Lemma multistep_App2 : forall v e e',
                          value v ->
                          multi step e e' ->
                          multi step (App v e) (App v e').
-Admitted.
+Proof.
+  intros.
+  eapply multi_context with (e1 := e) (e2 := e'); eauto.
+  eapply PApp2. eapply PHole. eapply PApp2. eapply PHole.
+Qed.
 
-Lemma value_closed : forall v, value v -> closed v.
-Admitted.
 
-Lemma extend_drop' : forall Σ (x:string) (v:exp),
-                       extend (drop x Σ) x v = cons (x,v) Σ.
+Lemma multi_subst : forall x v1 v2 e, [x:=v1]([x:=v2]e) = [x:=v2]e.
 Admitted.
 
 Lemma sub_close_extend :
@@ -561,6 +562,87 @@ Lemma sub_close_extend :
     [x:=v](close (drop x Σ) e) =
     close (extend (drop x Σ) x v) e.
 Admitted.
+
+Lemma swap_sub : forall x1 x2 v1 v2 e,
+                   x1 <> x2 ->
+                   closed v1 ->
+                   closed v2 ->
+                   [x1:=v1]([x2:=v2]e) = [x2:=v2]([x1:=v1]e).
+Proof.
+  intros.
+  induction e.
+  simpl.
+  destruct (string_dec s x1); subst.
+  destruct (string_dec x1 x2); subst.
+  exfalso; eauto.
+  simpl. rewrite string_dec_refl.
+  rewrite sub_closed; eauto.
+  destruct (string_dec s x2); subst.
+  simpl. rewrite string_dec_refl.
+  rewrite sub_closed; eauto.
+  simpl. rewrite string_dec_ne; eauto.
+  rewrite string_dec_ne; eauto.
+  eauto.
+  simpl.
+  destruct (string_dec s x1); subst; eauto.
+  destruct (string_dec x1 x2); subst; eauto.
+  simpl. rewrite string_dec_refl. rewrite string_dec_refl.
+  eauto.
+  simpl. rewrite string_dec_refl.
+  rewrite string_dec_ne; eauto.
+  destruct (string_dec s x2); subst; eauto.
+  simpl. rewrite string_dec_ne; eauto.
+  rewrite string_dec_refl. reflexivity.
+  simpl. rewrite string_dec_ne; eauto.
+  rewrite string_dec_ne; eauto.
+  rewrite IHe. reflexivity.
+  simpl. rewrite IHe1. rewrite IHe2. eauto.
+  simpl. rewrite IHe1. rewrite IHe2. rewrite IHe3. eauto.
+Qed.
+
+
+Lemma drop_sub : forall Σ x v e,
+                   closed v ->
+                   closed_env Σ ->
+                   close (drop x Σ) ([x:=v]e) =
+                   close Σ ([x:=v]e).
+Proof.
+  intro Σ.
+  induction Σ; intros; eauto.
+  destruct a; eauto.
+  simpl.
+  destruct (string_dec x s); eauto.
+  subst. rewrite multi_subst. eapply IHΣ; eauto.
+  inversion H0; eauto.
+  simpl.
+  rewrite swap_sub; eauto.
+  eapply IHΣ. inversion H0; eauto. inversion H0; eauto.
+  inversion H0; eauto.
+Qed.
+
+Lemma extend_drop' : forall Σ (x:string) (v:exp) e,
+                       closed_env Σ ->
+                       closed v ->
+                       close (extend (drop x Σ) x v) e = close (cons (x,v) Σ) e.
+Proof.
+  intros.
+  induction Σ; eauto; try (inversion H).
+  destruct a.
+  simpl.
+  destruct (string_dec x s). subst.
+  rewrite multi_subst.
+  rewrite (sub_close Σ).
+  rewrite sub_close_extend. rewrite IHΣ; eauto. simpl.
+  rewrite drop_sub; eauto.
+  inversion H; eauto.
+  inversion H; eauto. eauto.
+  inversion H; eauto.
+  simpl.
+  inversion H.
+  rewrite swap_sub; eauto.
+  rewrite drop_sub. reflexivity.
+  eauto. eauto.
+Qed.
 
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
@@ -622,11 +704,13 @@ Proof.
      rewrite close_abs.
      eapply SBeta. eauto. simpl.
      rewrite sub_close. eapply MultiRefl.
-     eapply value_closed; eauto.
+     eapply sn_closed; eauto.
      eapply fulfill_closed; eauto.
 
      rewrite <- extend_drop'.
      eapply H1. assumption.
+     eapply fulfill_closed; eauto.
+     eapply sn_closed; eauto.
 Qed.
 
 Lemma close_app : forall Σ e1 e2,
@@ -695,20 +779,21 @@ Qed.
 
 Theorem fundamental : forall e t Γ Σ,
                         Γ |- e t ->
-                        fulfills Γ Σ -> SN t (close Σ e).
+                            Γ |= Σ ->
+                            SN t (close Σ e).
 Proof.
   intros.
   generalize dependent Σ.
   induction H; intros.
 
   eapply TConst_compat; eauto.
+
   eapply TVar_compat; eauto.
 
-  eapply TAbs_compat.
-  eauto.
-  eauto.
+  eapply TAbs_compat; eauto.
   intros. eapply IHhas_type. rewrite extend_drop'. eapply FCons; eauto.
 
   eapply TApp_compat; eauto.
+
   eapply TIf_compat; eauto.
 Qed.
