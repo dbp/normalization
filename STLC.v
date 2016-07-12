@@ -180,11 +180,30 @@ Qed.
 Lemma plug_compose : forall C C' e e' e'',
                        plug C e e' ->
                        plug C' e' e'' ->
-                       (exists C'', plug C'' e e'' /\
-                               (* FIXME: uniqueness *)
-                               forall C''', plug C''' e e'' ->
-                                       C''' = C'').
-Admitted.
+                       (exists C'', forall e1 e2 e3,
+                                 plug C e1 e2 ->
+                                 plug C' e2 e3 ->
+                                 plug C'' e1 e3).
+Proof.
+  induction 2.
+  (* hole *)
+  exists C. intros. inversion H1; subst. eauto.
+  (* app1 *)
+  apply IHplug in H. inversion H.
+  exists (CApp1 x e2). intros.
+  destruct e4; inversion H3; subst.
+  eapply PApp1. eapply H1; eauto.
+  (* app2 *)
+  apply IHplug in H. inversion H.
+  exists (CApp2 e2 x). intros.
+  destruct e4; inversion H3; subst.
+  eapply PApp2. eapply H1; eauto.
+  (* if *)
+  apply IHplug in H. inversion H.
+  exists (CIf x e2 e3). intros.
+  destruct e5; inversion H3; subst.
+  eapply PIf. eapply H1; eauto.
+Qed.
 
 Lemma step_context : forall C e1 e2,
                         step e1 e2 ->
@@ -195,10 +214,11 @@ Lemma step_context : forall C e1 e2,
 Proof.
   intros.
   inversion H; subst.
-  destruct (plug_compose H2 H0). inversion H5; clear H5.
-  destruct (plug_compose H3 H1). inversion H5; clear H5.
-  assert (x0 = x). eapply H7 in H6. eapply H6. subst.
-  eapply Step; eauto.
+  destruct (plug_compose H2 H0).
+  eapply Step.
+  eapply (H5 _ _ _ H2 H0).
+  eapply (H5 _ _ _ H3 H1).
+  eauto.
 Qed.
 
 Lemma multi_context : forall C e1 e2,
@@ -224,14 +244,11 @@ Proof.
 
   inversion H. subst.
 
-  destruct (plug_compose H5 H1). inversion H8.
-  destruct (plug_compose H6 H4). inversion H11.
-  assert (x4 = x0). eapply H10. eassumption.
-  subst.
-
+  destruct (plug_compose H5 H1).
   eapply Step.
-  eapply H9.
-  eapply H12. eassumption.
+  eapply (H8 _ _ _ H5 H1).
+  eapply (H8 _ _ _ H6 H4).
+  eauto.
 Qed.
 
 Inductive free_in : string -> exp -> Prop :=
@@ -499,11 +516,63 @@ Proof.
 Qed.
 
 
+Lemma context_invariance : forall Γ Γ' e t,
+     Γ |-- e t  ->
+     (forall x, free_in x e -> lookup Γ x = lookup Γ' x)  ->
+     Γ' |-- e t.
+Proof.
+  intros.
+  generalize dependent Γ'.
+  induction H; eauto.
+  econstructor. rewrite H0 in H. eassumption. eauto.
+
+  econstructor. eapply IHhas_type. intros.
+  destruct (string_dec x x0); subst.
+  simpl. rewrite string_dec_refl. rewrite string_dec_refl. eauto.
+  simpl. rewrite string_dec_ne; eauto. rewrite string_dec_ne; eauto. rewrite lookup_drop. rewrite lookup_drop.
+  eapply H0. econstructor; eauto. eauto. eauto.
+
+  econstructor; eauto.
+
+  econstructor; eauto.
+Qed.
+
+
 Lemma substitution_preserves_typing : forall Γ x t v e t',
      (extend Γ x t') |-- e t  ->
      nil |-- v t'   ->
      Γ |-- ([x:=v]e) t.
-Admitted.
+Proof.
+  intros.
+  generalize dependent Γ.
+  generalize dependent t.
+  induction e;
+    intros; simpl; inversion H; subst; eauto.
+  (* val *)
+  destruct (string_dec s x); subst.
+  (* = *)
+  inversion H. simpl in H3.
+  rewrite string_dec_refl in H3. inversion H3. subst.
+  eapply context_invariance. eauto.
+  intros. destruct (free_in_context H1 H0). inversion H2.
+  (* <> *)
+  eapply TVar. inversion H. simpl in H3.
+  rewrite string_dec_ne in H3; eauto.
+  (* abs *)
+  destruct (string_dec s x); subst.
+  (* = *)
+  eapply context_invariance.
+  eapply H. intros. inversion H1.
+  simpl. rewrite string_dec_ne; eauto.
+  (* <> *)
+  eapply TAbs.
+  eapply IHe.
+  eapply context_invariance.
+  eapply H5.
+  intros. simpl. destruct (string_dec s x0); subst.
+  rewrite string_dec_ne; eauto.
+  rewrite string_dec_ne; eauto.
+Qed.
 
 Lemma sn_types : forall t e, SN t e -> nil |-- e t.
 Proof.
@@ -535,28 +604,6 @@ Proof.
     intros. unfold drop. destruct (string_dec x0 x); auto.
     constructor; eauto.
 Qed.
-
-Lemma context_invariance : forall Γ Γ' e t,
-     Γ |-- e t  ->
-     (forall x, free_in x e -> lookup Γ x = lookup Γ' x)  ->
-     Γ' |-- e t.
-Proof.
-  intros.
-  generalize dependent Γ'.
-  induction H; eauto.
-  econstructor. rewrite H0 in H. eassumption. eauto.
-
-  econstructor. eapply IHhas_type. intros.
-  destruct (string_dec x x0); subst.
-  simpl. rewrite string_dec_refl. rewrite string_dec_refl. eauto.
-  simpl. rewrite string_dec_ne; eauto. rewrite string_dec_ne; eauto. rewrite lookup_drop. rewrite lookup_drop.
-  eapply H0. econstructor; eauto. eauto. eauto.
-
-  econstructor; eauto.
-
-  econstructor; eauto.
-Qed.
-
 
 Lemma extend_drop : forall {T:Set}
                       (Γ : list (string * T))
