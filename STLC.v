@@ -2,20 +2,20 @@ Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Progra
 
 Set Implicit Arguments.
 
-Inductive exp : Set :=
-| Var : string -> exp
-| Const : bool -> exp
-| Abs : string -> exp -> exp
-| App : exp -> exp -> exp
-| If : exp -> exp -> exp -> exp.
-
 Inductive ty  : Set :=
 | Bool : ty
 | Fun : ty -> ty -> ty.
 
+Inductive exp : Set :=
+| Var : string -> exp
+| Const : bool -> exp
+| Abs : string -> ty -> exp -> exp
+| App : exp -> exp -> exp
+| If : exp -> exp -> exp -> exp.
+
 Inductive value : exp -> Prop :=
 | VBool : forall b, value (Const b)
-| VAbs : forall x e, value (Abs x e).
+| VAbs : forall x t e, value (Abs x t e).
 
 Definition tyenv := list (string * ty).
 
@@ -52,7 +52,7 @@ Inductive has_type : tyenv -> exp -> ty -> Prop :=
 | TConst : forall Γ b, has_type Γ (Const b) Bool
 | TVar : forall Γ x t, lookup Γ x = Some t -> has_type Γ (Var x) t
 | TAbs : forall Γ x e t t', has_type (extend (drop x Γ) x t) e t' ->
-                       has_type Γ (Abs x e) (Fun t t')
+                       has_type Γ (Abs x t e) (Fun t t')
 | TApp : forall Γ e e' t1 t2, has_type Γ e (Fun t1 t2) ->
                          has_type Γ e' t1 ->
                          has_type Γ (App e e') t2
@@ -85,9 +85,9 @@ Fixpoint sub (x:string) (e:exp) (e':exp) : exp :=
   match e with
     | Var y => if string_dec y x then e' else e
     | Const b => e
-    | Abs y body => if string_dec y x
-                   then e
-                   else Abs y (sub x body e')
+    | Abs y t body => if string_dec y x
+                     then e
+                     else Abs y t (sub x body e')
     | App e1 e2 => App (sub x e1 e') (sub x e2 e')
     | If ec e1 e2 => If (sub x ec e')
                        (sub x e1 e')
@@ -98,8 +98,8 @@ Notation "'[' x ':=' s ']' t" := (sub x t s) (at level 20).
 
 
 Inductive step_prim : exp -> exp -> Prop :=
-| SBeta : forall x e v, value v -> step_prim (App (Abs x e) v)
-                                       ([x:=v]e)
+| SBeta : forall x t e v, value v -> step_prim (App (Abs x t e) v)
+                                         ([x:=v]e)
 | SIfTrue : forall e1 e2, step_prim (If (Const true) e1 e2) e1
 | SIfFalse : forall e1 e2, step_prim (If (Const false) e1 e2) e2.
 
@@ -254,9 +254,9 @@ Qed.
 
 Inductive free_in : string -> exp -> Prop :=
 | free_var : forall x, free_in x (Var x)
-| free_abs : forall x y e, free_in x e ->
+| free_abs : forall x t y e, free_in x e ->
                       x <> y ->
-                      free_in x (Abs y e)
+                      free_in x (Abs y t e)
 | free_app1 : forall x e1 e2, free_in x e1 ->
                          free_in x (App e1 e2)
 | free_app2 : forall x e1 e2, free_in x e2 ->
@@ -507,8 +507,8 @@ Proof.
   eapply fulfill_closed; eauto.
 Qed.
 
-Lemma close_abs : forall Σ x e, close Σ (Abs x e) =
-                           Abs x (close (drop x Σ) e).
+Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
+                             Abs x t (close (drop x Σ) e).
 Proof.
   induction Σ; intros.
   reflexivity.
@@ -569,7 +569,7 @@ Proof.
   eapply TAbs.
   eapply IHe.
   eapply context_invariance.
-  eapply H5.
+  eapply H6.
   intros. simpl. destruct (string_dec s x0); subst.
   rewrite string_dec_ne; eauto.
   rewrite string_dec_ne; eauto.
@@ -676,9 +676,17 @@ Proof.
   inversion H; subst.
   inversion H0; subst.
   assert (t'0 = t'1).
-  Admitted.
-
-
+  eapply IHe. eapply H6. eapply H7. rewrite H1. eauto.
+  (* app *)
+  inversion H; subst.
+  inversion H0; subst.
+  assert ((Fun t1 t) = (Fun t0 t')).
+  eapply IHe1; eauto. inversion H1; eauto.
+  (* if *)
+  inversion H; subst.
+  inversion H0; subst.
+  eapply IHe2; eauto.
+Qed.
 
 Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e1' t ->
@@ -1162,10 +1170,10 @@ Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
                       (extend Γ x t) |-- e t' ->
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
-                      SN (Fun t t') (close Σ (Abs x e)).
+                      SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
   intros.
-  assert (WT: nil |-- (Abs x (close (drop x Σ) e)) (Fun t t')).
+  assert (WT: nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t')).
     { eapply TAbs. eapply close_preserves.
       { eapply fulfills_drop; eauto. }
       eapply context_invariance.
@@ -1194,7 +1202,7 @@ Proof.
      inversion H5.
      eapply anti_reduct' with (e' := close (extend (drop x Σ) x x0) e).
      eapply TApp. eapply WT. eapply sn_types; eauto.
-     eapply multi_trans with (b := (App (Abs x (close (drop x Σ) e)) x0)).
+     eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) x0)).
      inversion H6. clear H6.
      eapply multi_context with (e1 := s0) (e2 := x0); eauto.
      eapply PApp2. eapply PHole. eauto. eapply PApp2. eapply PHole. eauto.
