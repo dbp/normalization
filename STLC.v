@@ -658,6 +658,28 @@ Proof.
   eapply extend_drop''; eauto.
 Qed.
 
+Lemma unique_typing : forall e Γ t t',
+                        Γ |-- e t ->
+                        Γ |-- e t' ->
+                        t = t'.
+Proof.
+  intro e.
+  induction e; intros.
+  (* var *)
+  inversion H. inversion H0.
+  rewrite H3 in H7. inversion H7. eauto.
+  (* const *)
+  destruct t; inversion H.
+  destruct t'; inversion H0.
+  eauto.
+  (* abs *)
+  inversion H; subst.
+  inversion H0; subst.
+  assert (t'0 = t'1).
+  Admitted.
+
+
+
 Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e1' t ->
                             nil |-- e1 t' ->
@@ -665,7 +687,38 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             plug C e1 e1' ->
                             plug C e2 e2' ->
                             nil |-- e2' t.
-Admitted.
+Proof.
+  intro C.
+  induction C; intros.
+
+  inversion H2; subst.
+  assert (t = t'). eapply unique_typing; eauto.
+  subst.
+  inversion H3; subst; eauto.
+
+  inversion H2; subst.
+  inversion H3; subst.
+  inversion H; subst.
+  econstructor.
+  eapply IHC.
+  eapply H7. eapply H0. eapply H1. eauto. eauto. eauto.
+
+  inversion H2; subst.
+  inversion H3; subst.
+  inversion H; subst.
+  econstructor.
+  eapply H10.
+  eapply IHC.
+  eapply H13. eapply H0. eapply H1. eauto. eauto.
+
+  inversion H2; subst.
+  inversion H3; subst.
+  inversion H; subst.
+  econstructor.
+  eapply IHC.
+  eapply H8. eapply H0. eapply H1.
+  eauto. eauto. eauto. eauto.
+Qed.
 
 Lemma typed_hole : forall C e e' t,
                      nil |-- e t ->
