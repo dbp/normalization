@@ -75,8 +75,9 @@ Inductive plug : context -> exp -> exp -> Prop :=
 | PHole : forall e, plug CHole e e
 | PApp1 : forall e e' C e2, plug C e e' ->
                        plug (CApp1 C e2) e (App e' e2)
-| PApp2 : forall e e' C e2, plug C e e' ->
-                       plug (CApp2 e2 C) e (App e2 e')
+| PApp2 : forall e e' C v, plug C e e' ->
+                       value v ->
+                       plug (CApp2 v C) e (App v e')
 | PIf : forall e e' C e2 e3, plug C e e' ->
                         plug (CIf C e2 e3) e (If e' e2 e3).
 
@@ -145,13 +146,13 @@ Proof.
 
   inversion H. inversion H0.
   assert (e' = e'0).
-  eapply IHC. eapply H5. eassumption.
-  rewrite H11; reflexivity.
+  eapply IHC. eauto. eassumption.
+  subst; reflexivity.
 
   inversion H. inversion H0.
   assert (e' = e'0).
-  eapply IHC. eapply H6. eassumption.
-  rewrite H13; reflexivity.
+  eapply IHC. eauto. eassumption.
+  subst; reflexivity.
 Qed.
 
 Lemma plug_exists : forall C e e' e1,
@@ -169,7 +170,7 @@ Proof.
   exists (App x e). eapply PApp1; eauto.
   (* app2 *)
   inversion H; subst.
-  eapply IHC in H5; eauto. inversion H5.
+  eapply IHC in H3; eauto. inversion H3.
   exists (App e x). eapply PApp2; eauto.
   (* if *)
   inversion H; subst.
@@ -195,9 +196,9 @@ Proof.
   eapply PApp1. eapply H1; eauto.
   (* app2 *)
   apply IHplug in H. inversion H.
-  exists (CApp2 e2 x). intros.
-  destruct e4; inversion H3; subst.
-  eapply PApp2. eapply H1; eauto.
+  exists (CApp2 v x). intros.
+  destruct e3; inversion H4; subst.
+  eapply PApp2. eapply H2; eauto. eauto.
   (* if *)
   apply IHplug in H. inversion H.
   exists (CIf x e2 e3). intros.
@@ -634,12 +635,6 @@ Lemma preservation : forall Γ e1 e2 t, multi step e1 e2 ->
 Admitted.
 
 
-Lemma step_deterministic : forall e1 e2 e2',
-                             step e1 e2 ->
-                             step e1 e2' ->
-                             e2 = e2'.
-Admitted.
-
 Lemma values_dont_step : forall v e, value v -> ~step v e.
 Proof.
   unfold not. intros.
@@ -647,6 +642,91 @@ Proof.
   inversion H; subst; inversion H1; subst;
   inversion H3.
 Qed.
+
+
+Ltac invert H := inversion H; clear H; subst.
+Ltac invert1 H := invert H; [].
+
+Lemma step_prim_deterministic : forall e1 e2 e2',
+                                  step_prim e1 e2 ->
+                                  step_prim e1 e2' ->
+                                  e2 = e2'.
+Proof.
+  intros.
+  invert H; invert H0; eauto.
+Qed.
+
+Ltac smash :=
+  repeat try match goal with
+               |[H : App _ _ = App _ _ |- _] => invert H
+               |[H : If _ _ _ = If _ _ _ |- _] => invert H
+               |[H : plug _ _ _ |- _] => invert1 H
+               |[H : plug _ _ ?v, H1 : value ?v |- _] => invert H
+               |[H : step_prim _ _ |- _] => invert H
+               |[H : value (App _ _) |- _] => invert H
+               |[H : value (If _ _ _) |- _] => invert H
+               |[H : If _ _ _ = App _ _ |- _] => invert H
+               |[H : App _ _ = If _ _ _ |- _] => invert H
+             end.
+
+Lemma plug_step_uniq : forall C e e1 e2,
+                         plug C e1 e ->
+                         step_prim e1 e2 ->
+                         forall C' e1' e2',
+                           plug C' e1' e ->
+                           step_prim e1' e2' ->
+                           C = C' /\ e1' = e1.
+Proof.
+  intros C e e1 e2 H H0.
+  induction H; intros.
+  (* hole *)
+  inversion H0; inversion H; eauto; subst; eauto.
+  smash.
+  smash.
+  smash.
+  smash.
+  smash.
+  smash.
+  smash.
+  smash.
+  smash.
+
+  (* app1 *)
+  inversion H1.
+  smash.
+  assert (C = C0 /\ e1' = e).
+  eapply IHplug; eauto. inversion H8; subst; eauto.
+  smash.
+
+  (* app2 *)
+  inversion H2.
+  smash.
+  smash.
+  assert (C = C0 /\ e1' = e).
+  eapply IHplug; eauto. inversion H10; subst; eauto.
+
+  (* if *)
+  inversion H1.
+  smash.
+  assert (C = C0 /\ e1' = e).
+  eapply IHplug; eauto. inversion H9; subst; eauto.
+Qed.
+
+
+Lemma step_deterministic : forall e1 e2 e2',
+                             step e1 e2 ->
+                             step e1 e2' ->
+                             e2 = e2'.
+Proof.
+  induction 1; intros.
+  invert H2.
+  destruct (plug_step_uniq H H1 H3 H5); subst.
+  assert (e2 = e3).
+  apply (step_prim_deterministic H1 H5).
+  subst.
+  destruct (plug_same H4 H0); eauto.
+Qed.
+
 
 Lemma step_preserves_halting : forall e e',
                                  step e e' ->
@@ -854,7 +934,8 @@ Lemma multistep_App2 : forall v e e',
 Proof.
   intros.
   eapply multi_context with (e1 := e) (e2 := e'); eauto.
-  eapply PApp2. eapply PHole. eapply PApp2. eapply PHole.
+  eapply PApp2. eapply PHole. eauto.
+  eapply PApp2. eapply PHole. eauto.
 Qed.
 
 
@@ -987,7 +1068,7 @@ Proof.
      eapply multi_trans with (b := (App (Abs x (close (drop x Σ) e)) x0)).
      inversion H6. clear H6.
      eapply multi_context with (e1 := s0) (e2 := x0); eauto.
-     eapply PApp2. eapply PHole. eapply PApp2. eapply PHole.
+     eapply PApp2. eapply PHole. eauto. eapply PApp2. eapply PHole. eauto.
      eapply MultiStep. eapply Step. eapply PHole. eapply PHole. eapply SBeta. inversion H6; eauto.
      rewrite sub_close_extend. eapply MultiRefl.
      eapply sn_closed. eapply multistep_preserves_sn.
