@@ -634,17 +634,35 @@ Lemma preservation : forall Γ e1 e2 t, multi step e1 e2 ->
 Admitted.
 
 
+Lemma step_deterministic : forall e1 e2 e2',
+                             step e1 e2 ->
+                             step e1 e2' ->
+                             e2 = e2'.
+Admitted.
+
+Lemma values_dont_step : forall v e, value v -> ~step v e.
+Proof.
+  unfold not. intros.
+  inversion H0;
+  inversion H; subst; inversion H1; subst;
+  inversion H3.
+Qed.
 
 Lemma step_preserves_halting : forall e e',
                                  step e e' ->
                                  (halts e <-> halts e').
 Proof.
   intros. unfold halts.
-  split.
-  intros.
-  inversion H0; subst.
-Admitted.
-
+  split; intros; inversion H0; clear H0;
+  subst; inversion H1; clear H1.
+  (* -> *)
+  inversion H0; subst. exfalso.
+  eapply values_dont_step in H2. eauto.
+  assert (x2 = e'). eapply step_deterministic; eauto.
+  subst. exists x; eauto.
+  (* <- *)
+  exists x. split; eauto.
+Qed.
 
 Ltac use_sn :=
   match goal with
