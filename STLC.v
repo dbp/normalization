@@ -634,6 +634,7 @@ Lemma preservation : forall Γ e1 e2 t, multi step e1 e2 ->
 Admitted.
 
 
+
 Lemma step_preserves_halting : forall e e',
                                  step e e' ->
                                  (halts e <-> halts e').
@@ -914,6 +915,20 @@ Proof.
   inversion H; eauto.
 Qed.
 
+Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t,
+                        x <> x0 ->
+                        lookup ((x, t) :: Γ) x0 =
+                        lookup (mextend (cons (x, t) nil) Γ) x0.
+Proof.
+  intros.
+  simpl. rewrite string_dec_ne; eauto.
+  induction Γ; simpl.
+  rewrite string_dec_ne; eauto.
+  destruct a. simpl.
+  rewrite IHΓ. reflexivity.
+Qed.
+
+
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
@@ -930,11 +945,8 @@ Proof.
       intros.
       unfold extend. rewrite extend_drop. destruct (string_dec x0 x).
       + subst. simpl. rewrite string_dec_refl. rewrite string_dec_refl. reflexivity.
-      + unfold mextend.
-        induction Γ.
-        simpl. rewrite string_dec_ne; eauto.
-        (* from unfold extend onwards should be able to be replaced with eauto, but coq was hanging... *)
-        simpl. destruct a. rewrite string_dec_ne. unfold extend. simpl. reflexivity. unfold not. intros. eapply n. apply eq_sym. exact H3. }
+      + assert (drop x (nil : list (string * ty)) = nil); eauto. rewrite H3. eapply lookup_mextend; eauto.
+    }
     simpl. split. rewrite close_abs.
     auto.
     split.
@@ -1059,7 +1071,8 @@ Lemma extend_drop'' : forall Γ x t t' e,
                         (extend Γ x t) |-- e t'.
 Proof.
   intros.
-Admitted.
+  Admitted.
+
 
 Lemma drop_fulfills : forall Γ Σ x,
                         Γ |= Σ ->
