@@ -1067,12 +1067,20 @@ Proof.
 Qed.
 
 Lemma extend_drop'' : forall Γ x t t' e,
-                        (extend (drop x Γ) x t) |-- e t' =
+                        (extend (drop x Γ) x t) |-- e t' ->
                         (extend Γ x t) |-- e t'.
 Proof.
   intros.
-  Admitted.
-
+  eapply context_invariance; eauto.
+  intros.
+  inversion H0; subst;
+  inversion H; subst; simpl;
+  destruct (string_dec x x0); eauto; subst;
+  simpl;
+  try (repeat (rewrite string_dec_refl; eauto));
+  try (repeat (rewrite string_dec_ne; eauto));
+  rewrite lookup_drop; eauto.
+Qed.
 
 Lemma drop_fulfills : forall Γ Σ x,
                         Γ |= Σ ->
@@ -1099,7 +1107,7 @@ Proof.
   eapply TVar_compat; eauto.
 
   eapply TAbs_compat; eauto.
-  rewrite extend_drop'' in H. eauto.
+  eapply extend_drop'' in H. eauto.
   intros. eapply IHhas_type. eapply FCons; eauto.
   eapply drop_fulfills; eauto.
 
