@@ -629,10 +629,86 @@ Proof.
   simpl. destruct (string_dec s x); subst; eauto.
 Qed.
 
-Lemma preservation : forall Γ e1 e2 t, multi step e1 e2 ->
-                                  Γ |-- e1 t ->
-                                      Γ |-- e2 t.
+Lemma extend_drop'' : forall Γ x t t' e,
+                        (extend (drop x Γ) x t) |-- e t' ->
+                        (extend Γ x t) |-- e t'.
+Proof.
+  intros.
+  eapply context_invariance; eauto.
+  intros.
+  inversion H0; subst;
+  inversion H; subst; simpl;
+  destruct (string_dec x x0); eauto; subst;
+  simpl;
+  try (repeat (rewrite string_dec_refl; eauto));
+  try (repeat (rewrite string_dec_ne; eauto));
+  rewrite lookup_drop; eauto.
+Qed.
+
+
+Lemma preservation_prim_step : forall e1 e2 t,
+                                 nil |-- e1 t ->
+                                 step_prim e1 e2 ->
+                                 nil |-- e2 t.
+Proof.
+  intros.
+  inversion H0; subst; eauto; inversion H; subst; eauto.
+  eapply substitution_preserves_typing; eauto.
+  inversion H5; subst.
+  eapply extend_drop''; eauto.
+Qed.
+
+Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
+                            nil |-- e1' t ->
+                            nil |-- e1 t' ->
+                            nil |-- e2 t' ->
+                            plug C e1 e1' ->
+                            plug C e2 e2' ->
+                            nil |-- e2' t.
 Admitted.
+
+Lemma typed_hole : forall C e e' t,
+                     nil |-- e t ->
+                     plug C e' e ->
+                     exists t', nil |-- e' t'.
+Proof.
+  intros.
+  generalize dependent t.
+  induction H0; intros.
+  exists t; eauto.
+
+  inversion H; subst. destruct (IHplug (Fun t1 t) H4).
+  exists x; eauto.
+
+  inversion H1; subst. destruct (IHplug t1 H7).
+  exists x; eauto.
+
+  inversion H; subst. destruct (IHplug Bool H5).
+  exists x; eauto.
+Qed.
+
+
+Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
+                                     step e1 e2 ->
+                                     nil |-- e2 t.
+Proof.
+  intros.
+  inversion H0; subst.
+  destruct (typed_hole H H1).
+  assert (nil |-- e3 x).
+  eapply preservation_prim_step; eauto.
+  eapply preservation_plug.
+  eapply H. eapply H4. eapply H5. eapply H1. eapply H2.
+Qed.
+
+Lemma preservation : forall e1 e2 t, multi step e1 e2 ->
+                                nil |-- e1 t ->
+                                nil |-- e2 t.
+Proof.
+  intros.
+  induction H; eauto.
+  eapply preservation_step in H; eauto.
+Qed.
 
 
 Lemma values_dont_step : forall v e, value v -> ~step v e.
@@ -1138,7 +1214,7 @@ Proof.
   intros.
   rewrite close_if.
   (* need to get a boolean, so we know how to step *)
-  inversion H0. inversion H4. inversion H5. inversion H7. eapply preservation with (e2 := x) (Γ := nil) (t := Bool) in H8. inversion H8. inversion H7.
+  inversion H0. inversion H4. inversion H5. inversion H7. eapply preservation with (e2 := x) (t := Bool) in H8. inversion H8. inversion H7.
   destruct b; subst.
   (* true *)
   eapply anti_reduct with (e' := close Σ e2); eauto.
@@ -1165,21 +1241,6 @@ Proof.
 
 Qed.
 
-Lemma extend_drop'' : forall Γ x t t' e,
-                        (extend (drop x Γ) x t) |-- e t' ->
-                        (extend Γ x t) |-- e t'.
-Proof.
-  intros.
-  eapply context_invariance; eauto.
-  intros.
-  inversion H0; subst;
-  inversion H; subst; simpl;
-  destruct (string_dec x x0); eauto; subst;
-  simpl;
-  try (repeat (rewrite string_dec_refl; eauto));
-  try (repeat (rewrite string_dec_ne; eauto));
-  rewrite lookup_drop; eauto.
-Qed.
 
 Lemma drop_fulfills : forall Γ Σ x,
                         Γ |= Σ ->
