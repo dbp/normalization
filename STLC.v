@@ -24,10 +24,10 @@ Definition venv := list (string * exp).
 Definition extend {T : Set} (G : list (string * T)) (x:string) (t : T) : list (string * T) :=
   cons (x,t) G.
 
-Fixpoint mextend  {T : Set} (e : list (string * T)) (G : list (string * T)) : list (string * T) :=
+Fixpoint mextend  {T : Set} (e : list (string * T)) (G : list (string * T)) {struct G} : list (string * T) :=
   match G with
     | nil => e
-    | cons (x,v) G' => extend G' x v
+    | cons (x,v) G' => extend (mextend e G') x v
   end.
 
 Fixpoint lookup {T : Set}
@@ -46,7 +46,7 @@ Fixpoint drop {T : Set}
     | cons (y,t) rest => if string_dec x y then drop x rest else cons (y,t) (drop x rest)
   end.
 
-Reserved Notation "Γ '|-' e" (at level 10).
+Reserved Notation "Γ '|--' e" (at level 10).
 
 Inductive has_type : tyenv -> exp -> ty -> Prop :=
 | TConst : forall Γ b, has_type Γ (Const b) Bool
@@ -60,7 +60,7 @@ Inductive has_type : tyenv -> exp -> ty -> Prop :=
                         has_type Γ e2 t ->
                         has_type Γ e3 t ->
                         has_type Γ (If e1 e2 e3) t
-where "Γ '|-' e" := (has_type Γ e).
+where "Γ '|--' e" := (has_type Γ e).
 
 Hint Constructors has_type ty exp value.
 
@@ -159,16 +159,47 @@ Lemma plug_exists : forall C e e' e1,
                       multi step e e1 ->
                       exists e1', plug C e1 e1'.
 Proof.
-Admitted.
-
+  intro C.
+  induction C; intros.
+  (* hole *)
+  exists e1. eapply PHole.
+  (* app1 *)
+  inversion H; subst.
+  eapply IHC in H5; eauto. inversion H5.
+  exists (App x e). eapply PApp1; eauto.
+  (* app2 *)
+  inversion H; subst.
+  eapply IHC in H5; eauto. inversion H5.
+  exists (App e x). eapply PApp2; eauto.
+  (* if *)
+  inversion H; subst.
+  eapply IHC in H6; eauto. inversion H6.
+  exists (If x e e0). eapply PIf; eauto.
+Qed.
 
 Lemma plug_compose : forall C C' e e' e'',
                        plug C e e' ->
                        plug C' e' e'' ->
                        (exists C'', plug C'' e e'' /\
-                               forall C''', plug C'' e e'' ->
+                               (* FIXME: uniqueness *)
+                               forall C''', plug C''' e e'' ->
                                        C''' = C'').
 Admitted.
+
+Lemma step_context : forall C e1 e2,
+                        step e1 e2 ->
+                        forall e1' e2',
+                        plug C e1 e1' ->
+                        plug C e2 e2' ->
+                        step e1' e2'.
+Proof.
+  intros.
+  inversion H; subst.
+  destruct (plug_compose H2 H0). inversion H5; clear H5.
+  destruct (plug_compose H3 H1). inversion H5; clear H5.
+  assert (x0 = x). eapply H7 in H6. eapply H6. subst.
+  eapply Step; eauto.
+Qed.
 
 Lemma multi_context : forall C e1 e2,
                         multi step e1 e2 ->
@@ -232,7 +263,7 @@ Fixpoint closed_env (e:venv) :=
 Definition halts  (e:exp) : Prop :=  exists e', multi step e e' /\  value e'.
 
 Fixpoint SN (T : ty) (t : exp) : Prop :=
-  (nil |- t T) /\ halts t /\
+  (nil |-- t T) /\ halts t /\
   (match T with
      | Bool => True
      | Fun T1 T2 => forall s, SN T1 s -> SN T2 (App t s)
@@ -269,7 +300,11 @@ Proof.
 Qed.
 
 Lemma sn_halts : forall t e, SN t e -> halts e.
-Admitted.
+Proof.
+  intros.
+  unfold SN in H.
+  destruct t; inversion H; inversion H1; eauto.
+Qed.
 
 Lemma TConst_compat : forall Γ Σ b, Γ |= Σ ->
                                SN Bool (close Σ (Const b)).
@@ -381,11 +416,22 @@ Qed.
 Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
                       x <> y ->
                       lookup (drop x Γ) y = lookup Γ y.
-Admitted.
+Proof.
+  intros.
+  induction Γ; eauto.
+  simpl.
+  destruct a.
+  destruct (string_dec x s); subst; eauto.
+  destruct (string_dec s y); subst; eauto.
+  contradiction H. reflexivity.
+  destruct (string_dec s y); subst; eauto.
+  simpl. rewrite string_dec_refl. reflexivity.
+  simpl. rewrite string_dec_ne; eauto.
+Qed.
 
 Lemma free_in_context : forall x e t Γ,
                           free_in x e ->
-                          Γ |- e t ->
+                          Γ |-- e t ->
                               exists t', lookup Γ x = Some t'.
 Proof.
   intros.
@@ -396,7 +442,7 @@ Proof.
   eauto.
 Qed.
 
-Lemma typable_empty_closed : forall e t, nil |- e t -> closed e.
+Lemma typable_empty_closed : forall e t, nil |-- e t -> closed e.
 Proof.
   intros.
   unfold closed. unfold not.
@@ -404,7 +450,7 @@ Proof.
   destruct (free_in_context H0 H). inversion H1.
 Qed.
 
-Lemma sn_typable_empty : forall e t, SN t e -> nil |- e t.
+Lemma sn_typable_empty : forall e t, SN t e -> nil |-- e t.
 Proof.
   intros.
   destruct t; unfold SN in H; destruct H; eauto.
@@ -452,18 +498,33 @@ Proof.
   simpl. destruct (string_dec x s); simpl; eauto.
 Qed.
 
-Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
-                        forall G e t,
-                          (mextend G Γ) |- e t ->
-                          G |- (close Σ e) t.
-Proof.
+
+Lemma substitution_preserves_typing : forall Γ x t v e t',
+     (extend Γ x t') |-- e t  ->
+     nil |-- v t'   ->
+     Γ |-- ([x:=v]e) t.
 Admitted.
 
-Lemma multistep_preserves_sn : forall t e e',
-                                 multi step e e' ->
-                                 SN t e ->
-                                 SN t e'.
-Admitted.
+Lemma sn_types : forall t e, SN t e -> nil |-- e t.
+Proof.
+  intros.
+  destruct t; unfold SN in H; inversion H; eauto.
+Qed.
+
+
+Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
+                        forall G e t,
+                          (mextend G Γ) |-- e t ->
+                          G |-- (close Σ e) t.
+Proof.
+  induction 1; intros.
+  simpl in *; eauto.
+
+  simpl in H1. simpl.
+  apply IHfulfills.
+  eapply substitution_preserves_typing; eauto.
+  eapply sn_types; eauto.
+Qed.
 
 Lemma fulfills_drop : forall Γ Σ,
     Γ |= Σ ->
@@ -476,32 +537,129 @@ Proof.
 Qed.
 
 Lemma context_invariance : forall Γ Γ' e t,
-     Γ |- e t  ->
+     Γ |-- e t  ->
      (forall x, free_in x e -> lookup Γ x = lookup Γ' x)  ->
-     Γ' |- e t.
-Admitted.
-
-Lemma extend_drop : forall {T:Set} (Γ : list (string * T)) (Γ' : list (string * T)) x x',
-  lookup (mextend Γ' (drop x' Γ)) x
-  = if string_dec x x' then lookup Γ' x else lookup (mextend Γ' Γ) x.
-Admitted.
-
-
-Lemma preservation : forall Γ e1 e2 t, multi step e1 e2 ->
-                                  Γ |- e1 t ->
-                                      Γ |- e2 t.
-Admitted.
-
-
-Lemma sn_types : forall t e, SN t e -> nil |- e t.
+     Γ' |-- e t.
 Proof.
   intros.
-  destruct t; unfold SN in H; inversion H; eauto.
+  generalize dependent Γ'.
+  induction H; eauto.
+  econstructor. rewrite H0 in H. eassumption. eauto.
+
+  econstructor. eapply IHhas_type. intros.
+  destruct (string_dec x x0); subst.
+  simpl. rewrite string_dec_refl. rewrite string_dec_refl. eauto.
+  simpl. rewrite string_dec_ne; eauto. rewrite string_dec_ne; eauto. rewrite lookup_drop. rewrite lookup_drop.
+  eapply H0. econstructor; eauto. eauto. eauto.
+
+  econstructor; eauto.
+
+  econstructor; eauto.
 Qed.
+
+
+Lemma extend_drop : forall {T:Set}
+                      (Γ : list (string * T))
+                      (Γ' : list (string * T)) x x',
+  lookup (mextend Γ' (drop x' Γ)) x
+  = if string_dec x x'
+    then lookup Γ' x
+    else lookup (mextend Γ' Γ) x.
+Proof.
+  intros.
+  destruct (string_dec x x'); subst.
+
+  induction Γ; eauto.
+  destruct a. simpl. rewrite <- IHΓ.
+  destruct (string_dec x' s); subst; eauto.
+  simpl. rewrite string_dec_ne; eauto.
+
+  induction Γ; eauto.
+  simpl. destruct a.
+  destruct (string_dec x' s); subst; eauto.
+  rewrite IHΓ. simpl. rewrite string_dec_ne; eauto.
+  simpl. destruct (string_dec s x); subst; eauto.
+Qed.
+
+Lemma preservation : forall Γ e1 e2 t, multi step e1 e2 ->
+                                  Γ |-- e1 t ->
+                                      Γ |-- e2 t.
+Admitted.
+
+
+Lemma step_preserves_halting : forall e e',
+                                 step e e' ->
+                                 (halts e <-> halts e').
+Proof.
+  intros. unfold halts.
+  split.
+  intros.
+  inversion H0; subst.
+Admitted.
+
+
+Ltac use_sn :=
+  match goal with
+    | [H : SN _ _ |- _ ] => unfold SN in H; fold SN in H
+  end;
+  repeat match goal with
+           | [ H : _ /\ _ |- _ ] => destruct H
+         end;
+  unfold SN; fold SN; intuition.
+
+
+Ltac use_preservation :=
+  match goal with
+    | [ H : nil |-- ?e ?t, S : step ?e ?u |- nil |-- ?u ?t ] =>
+      eapply preservation; repeat eassumption
+  end.
+
+Ltac use_preserve_halting :=
+  match goal with
+    | [ H : step ?T ?U, H1 : halts ?T |- halts ?U ] =>
+      eapply (step_preserves_halting T U); repeat eassumption
+    | [ H : multi step ?T ?U, H1 : halts ?T |- halts ?U ] =>
+      eapply MultiStep; eauto; eapply (step_preserves_halting T U); repeat eassumption
+  end.
+
+
+Lemma step_preserves_sn : forall t e e',
+                            step e e' ->
+                            SN t e ->
+                            SN t e'.
+Proof.
+  induction t; intros e e' H H0;
+
+  use_sn; try use_preservation; try use_preserve_halting.
+
+  eapply MultiStep. eapply H; eauto. eauto.
+  eapply step_preserves_halting with (e := e); eauto.
+
+  eapply MultiStep. eapply H; eauto. eauto.
+  eapply step_preserves_halting with (e := e); eauto.
+
+  eapply IHt2; eauto.
+
+  eapply step_context. eapply H.
+  eapply PApp1. eapply PHole.
+  eapply PApp1. eapply PHole.
+Qed.
+
+Lemma multistep_preserves_sn : forall t e e',
+                                 multi step e e' ->
+                                 SN t e ->
+                                 SN t e'.
+Proof.
+  intros.
+  induction H; eauto.
+  eapply IHmulti.
+  eapply step_preserves_sn; eauto.
+Qed.
+
 
 Lemma anti_reduct : forall e' e t, multi step e e' ->
                               SN t e' ->
-                              nil |- e t ->
+                              nil |-- e t ->
                               SN t e.
 Proof.
   intros.
@@ -534,39 +692,13 @@ Proof.
 Qed.
 
 Lemma anti_reduct' : forall e' e t,
-                       nil |- e t ->
+                       nil |-- e t ->
                        multi step e e' ->
                               SN t e' ->
                               SN t e.
 Proof.
   intros. eapply anti_reduct; eauto.
 Qed.
-
-Lemma sub_close: forall Σ x v e,
-                      closed v ->
-                      closed_env Σ ->
-                      close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
-Admitted.
-
-Lemma multistep_App2 : forall v e e',
-                         value v ->
-                         multi step e e' ->
-                         multi step (App v e) (App v e').
-Proof.
-  intros.
-  eapply multi_context with (e1 := e) (e2 := e'); eauto.
-  eapply PApp2. eapply PHole. eapply PApp2. eapply PHole.
-Qed.
-
-
-Lemma multi_subst : forall x v1 v2 e, [x:=v1]([x:=v2]e) = [x:=v2]e.
-Admitted.
-
-Lemma sub_close_extend :
-  forall x v e Σ,
-    [x:=v](close (drop x Σ) e) =
-    close (extend (drop x Σ) x v) e.
-Admitted.
 
 Lemma swap_sub : forall x1 x2 v1 v2 e,
                    x1 <> x2 ->
@@ -606,6 +738,86 @@ Proof.
 Qed.
 
 
+Lemma multi_subst : forall x v1 v2 e,
+                      closed v1 -> closed v2 ->
+                      [x:=v1]([x:=v2]e) = [x:=v2]e.
+Proof.
+  intros.
+  induction e.
+  simpl.
+  destruct (string_dec s x); eauto.
+  rewrite sub_closed; eauto.
+  simpl. rewrite string_dec_ne; eauto.
+  eauto.
+  simpl. destruct (string_dec s x); eauto.
+  simpl. destruct (string_dec s x); eauto.
+  exfalso. eapply n; eapply e0.
+  simpl. destruct (string_dec s x); eauto.
+  rewrite IHe; eauto.
+  simpl. rewrite IHe1. rewrite IHe2. eauto.
+  simpl. rewrite IHe1. rewrite IHe2. rewrite IHe3. eauto.
+Qed.
+
+Lemma sub_close: forall Σ x v e,
+                      closed v ->
+                      closed_env Σ ->
+                      close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
+Proof.
+  intro Σ.
+  induction Σ; intros; eauto.
+
+  destruct a; subst.
+  simpl.
+
+  destruct (string_dec s x); subst; eauto.
+  rewrite string_dec_refl.
+  rewrite multi_subst. eapply IHΣ; eauto.
+  inversion H0; eauto. inversion H0; eauto. eauto.
+
+  rewrite string_dec_ne. simpl.
+  rewrite swap_sub; eauto.
+  eapply IHΣ; eauto.
+  inversion H0; eauto. inversion H0; eauto. eauto.
+Qed.
+
+
+Lemma multistep_App2 : forall v e e',
+                         value v ->
+                         multi step e e' ->
+                         multi step (App v e) (App v e').
+Proof.
+  intros.
+  eapply multi_context with (e1 := e) (e2 := e'); eauto.
+  eapply PApp2. eapply PHole. eapply PApp2. eapply PHole.
+Qed.
+
+
+
+
+
+
+Lemma sub_close_extend :
+  forall x v e Σ,
+    closed v ->
+    closed_env Σ ->
+    [x:=v](close (drop x Σ) e) =
+    close (extend (drop x Σ) x v) e.
+Proof.
+  intros.
+  generalize dependent e.
+  simpl.
+  induction Σ; intros; eauto.
+  destruct a.
+  simpl. destruct (string_dec x s); eauto.
+  eapply IHΣ; eauto.
+  inversion H0; eauto.
+  simpl.
+  rewrite IHΣ.
+  rewrite swap_sub; eauto.
+  inversion H0; eauto.
+  inversion H0; eauto.
+Qed.
+
 Lemma drop_sub : forall Σ x v e,
                    closed v ->
                    closed_env Σ ->
@@ -618,7 +830,8 @@ Proof.
   simpl.
   destruct (string_dec x s); eauto.
   subst. rewrite multi_subst. eapply IHΣ; eauto.
-  inversion H0; eauto.
+  inversion H0; eauto. inversion H0; eauto.
+  eauto.
   simpl.
   rewrite swap_sub; eauto.
   eapply IHΣ. inversion H0; eauto. inversion H0; eauto.
@@ -642,22 +855,27 @@ Proof.
   inversion H; eauto.
   inversion H; eauto. eauto.
   inversion H; eauto.
+  eauto.
+  inversion H; eauto.
+  inversion H; eauto.
+  eauto.
   simpl.
-  inversion H.
   rewrite swap_sub; eauto.
   rewrite drop_sub. reflexivity.
   eauto. eauto.
+  inversion H; eauto.
+  inversion H; eauto.
 Qed.
 
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
-                      (extend Γ x t) |- e t' ->
+                      (extend Γ x t) |-- e t' ->
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x e)).
 Proof.
   intros.
-  assert (WT: nil |- (Abs x (close (drop x Σ) e)) (Fun t t')).
+  assert (WT: nil |-- (Abs x (close (drop x Σ) e)) (Fun t t')).
     { eapply TAbs. eapply close_preserves.
       { eapply fulfills_drop; eauto. }
       eapply context_invariance.
@@ -695,7 +913,14 @@ Proof.
      eapply PApp2. eapply PHole. eapply PApp2. eapply PHole.
      eapply MultiStep. eapply Step. eapply PHole. eapply PHole. eapply SBeta. inversion H6; eauto.
      rewrite sub_close_extend. eapply MultiRefl.
-     eapply H1. eapply multistep_preserves_sn. inversion H6.
+     eapply sn_closed. eapply multistep_preserves_sn.
+     inversion H6.
+     eapply H7. eauto.
+
+     eapply fulfill_closed; eauto.
+
+     eapply H1. eapply multistep_preserves_sn.
+     inversion H6.
      eapply H7. eauto.
 
      eapply sn_types. eapply H2.
@@ -783,17 +1008,25 @@ Proof.
 Qed.
 
 Lemma extend_drop'' : forall Γ x t t' e,
-                        (extend (drop x Γ) x t) |- e t' =
-                        (extend Γ x t) |- e t'.
+                        (extend (drop x Γ) x t) |-- e t' =
+                        (extend Γ x t) |-- e t'.
+Proof.
+  intros.
 Admitted.
 
 Lemma drop_fulfills : forall Γ Σ x,
                         Γ |= Σ ->
                         drop x Γ |= drop x Σ.
-Admitted.
+Proof.
+  intros.
+  induction H. econstructor.
+  simpl.
+  destruct (string_dec x x0); eauto.
+  econstructor. eauto. eassumption.
+Qed.
 
 Theorem fundamental : forall e t Γ Σ,
-                        Γ |- e t ->
+                        Γ |-- e t ->
                             Γ |= Σ ->
                             SN t (close Σ e).
 Proof.
