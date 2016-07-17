@@ -1187,14 +1187,15 @@ Proof.
   induction Σ; simpl; intuition.
 Qed.
 
+Hint Rewrite close_app.
+
 Lemma TApp_compat : forall Γ Σ e1 e2 t t',
                       Γ |= Σ ->
                       SN (Fun t t') (close Σ e1) ->
                       SN t (close Σ e2) ->
                       SN t' (close Σ (App e1 e2)).
 Proof.
-  intros;
-  rewrite close_app; crush.
+  intros; crush.
 Qed.
 
 Lemma close_if : forall Σ e1 e2 e3,
@@ -1205,6 +1206,14 @@ Proof.
   induction Σ; simpl; intuition.
 Qed.
 
+Hint Rewrite close_if.
+
+Ltac branch boo e ife :=
+    eapply anti_reduct with (e' := e); crush;
+    eapply multi_trans with (b := ife);
+    iauto;
+    eapply multi_context; iauto.
+
 Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       Γ |= Σ ->
                       SN Bool (close Σ e1) ->
@@ -1212,28 +1221,30 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
-  intros.
-  rewrite close_if.
-  (* need to get a boolean, so we know how to step *)
-  inversion H0. inversion H4. inversion H5. inversion H7. eapply preservation with (e2 := x) (t := Bool) in H8. inversion H8. inversion H7.
-  destruct b; subst.
-  (* true *)
-  eapply anti_reduct with (e' := close Σ e2); eauto.
-  eapply multi_trans with (b := (If (Const true) (close Σ e2) (close Σ e3))).
-  eapply multi_context.
-  eauto.
-  eapply PIf. eapply PHole. eapply PIf. eapply PHole.
-  eapply MultiStep. eapply Step with (C := CHole). eapply PHole. eapply PHole. eapply SIfTrue. eapply MultiRefl.
-  (* false *)
-  eapply anti_reduct with (e' := close Σ e3); eauto.
-  eapply multi_trans with (b := (If (Const false) (close Σ e2) (close Σ e3))).
-  eapply multi_context.
-  eauto.
-  eapply PIf. eapply PHole. eapply PIf. eapply PHole.
-  eapply MultiStep. eapply Step with (C := CHole). eapply PHole. eapply PHole. eapply SIfFalse. eapply MultiRefl.
-
-  subst. inversion H9. subst. inversion H9. subst. inversion H9. eapply sn_types; eauto.
-
+  intros; crush;
+  match goal with
+    |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
+     invert H1
+  end;
+  crush;
+  match goal with
+    |[H0: value ?x, H1: multi step _ ?x |- _] =>
+     assert (nil |-- x Bool) by iauto;
+       destruct x; iauto; try solve [inversion H0]
+  end;
+  try (match goal with
+         |[H : value (Const ?b) |- _] =>
+          destruct b
+       end;
+       match goal with
+         |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
+          branch true e (If (Const true) e n)
+         |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
+          branch false e (If (Const false) n e)
+       end);
+  match goal with
+    |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
+  end.
 Qed.
 
 
@@ -1242,10 +1253,10 @@ Lemma drop_fulfills : forall Γ Σ x,
                         drop x Γ |= drop x Σ.
 Proof.
   intros.
-  induction H. econstructor.
-  simpl.
-  destruct (string_dec x x0); eauto.
+  induction H; iauto.
 Qed.
+
+Hint Resolve drop_fulfills.
 
 Theorem fundamental : forall e t Γ Σ,
                         Γ |-- e t ->
