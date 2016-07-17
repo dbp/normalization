@@ -1,10 +1,11 @@
 Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Program.Equality.
 
+Load CpdtTactics.
+
 Set Implicit Arguments.
 
 Ltac iauto := try solve [intuition (eauto 3)].
-
-Ltac iauton n := try solve [intuition (eauto n)].
+Ltac iauto' := try solve [intuition eauto].
 
 Inductive ty  : Set :=
 | Bool : ty
@@ -141,14 +142,17 @@ Proof.
   induction H; iauto.
 Qed.
 
+Hint Resolve multi_trans.
 
-Ltac use_plug_tac :=
+Ltac invert H := inversion H; clear H; try subst.
+
+Ltac plug_invert :=
   try repeat
       match goal with
-        |[H : plug CHole _ _ |- _ ] => inversion H; clear H; subst
-        |[H : plug (CApp1 _ _) _ _ |- _ ] => inversion H; clear H; subst
-        |[H : plug (CApp2 _ _) _ _ |- _ ] => inversion H; clear H; subst
-        |[H : plug (CIf _ _ _) _ _ |- _ ] => inversion H; clear H; subst
+        |[H : plug CHole _ _ |- _ ] => invert H
+        |[H : plug (CApp1 _ _) _ _ |- _ ] => invert H
+        |[H : plug (CApp2 _ _) _ _ |- _ ] => invert H
+        |[H : plug (CIf _ _ _) _ _ |- _ ] => invert H
       end.
 
 Ltac use_ih_tac :=
@@ -182,8 +186,12 @@ Lemma plug_same : forall C x e1 e2,
                     e1 = e2.
 Proof.
   intro C.
-  induction C; intros; use_plug_tac;
-  try use_ih_tac; iauto.
+  induction C;
+    intros;
+    plug_invert;
+    crush;
+    use_ih_tac;
+    crush.
 Qed.
 
 Hint Rewrite plug_same.
@@ -195,7 +203,7 @@ Lemma plug_exists : forall C e e' e1,
 Proof.
   intro C.
   induction C; intros;
-  use_plug_tac;
+  plug_invert;
   try match goal with
         |[H : plug C _ _ |- _ ] =>
          eapply IHC in H; iauto; inversion H
@@ -206,6 +214,8 @@ Proof.
   solve [exists (App e x); iauto].
   solve [exists (If x e e0); iauto].
 Qed.
+
+Hint Resolve plug_exists.
 
 Lemma plug_compose : forall C C' e e' e'',
                        plug C e e' ->
@@ -224,8 +234,10 @@ Proof.
    | exists (CApp1 x e2)
    | exists (CApp2 v x)
    | exists (CIf x e2 e3)
-  ]; intros; use_plug_tac; iauto.
+  ]; intros; plug_invert; iauto.
 Qed.
+
+Hint Resolve plug_compose.
 
 Lemma step_context : forall C e1 e2,
                         step e1 e2 ->
@@ -237,8 +249,10 @@ Proof.
   intros.
   inversion H; subst.
   destruct (plug_compose H2 H0).
-  iauto.
+  iauto'.
 Qed.
+
+Hint Resolve step_context.
 
 Lemma multi_context : forall C e1 e2,
                         multi step e1 e2 ->
@@ -250,14 +264,9 @@ Proof.
   intros C e1 e2 H.
   induction H; intros.
   rewrite (plug_same H H0); iauto.
-
-  assert (exists ex2, plug C x2 ex2).
-  eapply (plug_exists H1); iauto.
-  use_ex_tac.
-
+  assert (exists ex2, plug C x2 ex2). iauto.
+  crush.
   assert (H5: step e1' x); iauto.
-  inversion H. subst. destruct (plug_compose H4 H1).
-  iauto.
 Qed.
 
 Inductive free_in : string -> exp -> Prop :=
@@ -278,9 +287,9 @@ Inductive free_in : string -> exp -> Prop :=
 
 Hint Constructors free_in.
 
-Ltac use_free_tac :=
+Ltac free_invert :=
   match goal with
-    |[H : free_in _ _ |- _] => inversion H; clear H; subst; iauto
+    |[H : free_in _ _ |- _] => invert H
   end.
 
 Definition closed t := forall x, ~ free_in x t.
@@ -326,24 +335,6 @@ Qed.
 
 Hint Rewrite close_const.
 
-Ltac absurdities :=
-  match goal with
-    |[ H : lookup nil _ = Some _ |- _ ] => inversion H
-    |[ H : None = Some _ |- _ ] => inversion H
-    |[ H : Some _ = None |- _ ] => inversion H
-  end; eauto.
-
-Ltac general :=
-  try absurdities;
-  try repeat match goal with
-        |[ x : _ * _ |- _ ] => destruct x
-        |[ x : _ /\ _ |- _ ] => destruct x
-        |[ x : Some _ = Some _ |- _ ] => inversion x; clear x
-        |[ H : SN Bool _ |- _] => inversion H; clear H
-        |[ H : SN (Fun _ _) _ |- _] => inversion H; clear H
-  end; iauto.
-
-
 Lemma halts_value : forall v, value v -> halts v.
 Proof.
   intros. exists v. iauto.
@@ -351,11 +342,10 @@ Qed.
 
 Lemma sn_halts : forall t e, SN t e -> halts e.
 Proof.
-  intros. destruct t; general.
+  intros. destruct t; crush.
 Qed.
 
 Hint Resolve halts_value sn_halts.
-
 
 Lemma string_dec_refl : forall T s (t:T) (f:T), (if string_dec s s then t else f) = t.
 Proof.
@@ -368,6 +358,8 @@ Proof.
   intros.
   destruct (string_dec s s'). subst. contradiction H. eauto. reflexivity.
 Qed.
+
+Hint Rewrite string_dec_ne string_dec_refl.
 
 Ltac strings' x y :=
   destruct (string_dec x y);
@@ -389,14 +381,23 @@ Ltac strings :=
   intuition.
 
 
-Hint Rewrite string_dec_ne string_dec_refl.
+Ltac string_destruct :=
+  repeat (match goal with
+            |[ H : context[string_dec ?x ?y] |- _ ] =>
+             destruct (string_dec x y); try subst
+            |[ H : _ |- context[string_dec ?x ?y] ] =>
+             destruct (string_dec x y); try subst
+          end).
 
+Ltac pair_destruct :=
+  repeat (match goal with
+            |[ a : _ * _ |- _] => destruct a
+          end).
 
 Lemma TConst_compat : forall Γ Σ b, Γ |= Σ ->
                                SN Bool (close Σ (Const b)).
 Proof.
-  intros. split;
-    autorewrite with core; iauto.
+  crush.
 Qed.
 
 
@@ -407,8 +408,8 @@ Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
                              exists v, lookup Σ x = Some v.
 Proof.
   intros Γ Σ H.
-  induction H; intros; general;
-  simpl in *; strings.
+  induction H; intros;
+  simpl in *; string_destruct; iauto; crush.
 Qed.
 
 
@@ -416,38 +417,37 @@ Lemma sub_closed : forall x e, ~ free_in x e ->
                           forall e', [x:=e']e = e.
 Proof.
   intros.
-  induction e; simpl; general; strings;
+  induction e; simpl; string_destruct; crush; iauto;
   repeat match goal with
-    |[H : ?P = ?Q |- context[?P]] => rewrite H; clear H
-  end; iauto.
+           |[H : _ -> ?P = ?Q |- context[?P]] =>
+            rewrite H; clear H
+         end; iauto.
 Qed.
 
-Hint Resolve sub_closed lookup_fulfill_v.
+Hint Rewrite sub_closed lookup_fulfill_v.
 
 Lemma close_closed : forall Σ e, closed e -> close Σ e = e.
 Proof.
   intro Σ.
-  induction Σ; general; intros; simpl.
-  assert (H1 : [s:=e]e0 = e0). iauto.
-  rewrite H1. iauto.
+  induction Σ; crush.
+  unfold closed in *; iauto.
 Qed.
 
 Hint Resolve close_closed.
 
-Ltac string_hammer_tac :=
+Ltac string_hammer :=
   repeat (simpl in *;
-           general;
-          strings;
-          general;
-          subst;
-          general).
+           crush;
+          string_destruct;
+          crush).
 
 Lemma close_var : forall Σ x e, closed_env Σ ->
                            lookup Σ x = Some e ->
                            close Σ (Var x) = e.
 Proof.
   intros.
-  induction Σ; string_hammer_tac.
+  induction Σ; crush; pair_destruct;
+  string_destruct; crush.
 Qed.
 
 Hint Resolve close_var.
@@ -460,7 +460,8 @@ Lemma lookup_fulfill_sn : forall Γ Σ,
                               SN t v.
 Proof.
   intros Γ Σ H.
-  induction H; intros; string_hammer_tac.
+  induction H; intros; [crush|idtac].
+  simpl in *; string_destruct; iauto; crush.
 Qed.
 
 Hint Resolve lookup_fulfill_sn.
@@ -470,7 +471,8 @@ Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
                       lookup (drop x Γ) y = lookup Γ y.
 Proof.
   intros.
-  induction Γ; string_hammer_tac.
+  induction Γ; simpl in *; pair_destruct;
+  string_destruct; crush.
 Qed.
 
 Hint Resolve lookup_drop.
@@ -481,12 +483,7 @@ Lemma free_in_context : forall x e t Γ,
                               exists t', lookup Γ x = Some t'.
 Proof.
   intros.
-  induction H0;
-    general;
-    use_free_tac;
-    use_ex_tac;
-    simpl in *;
-    strings.
+  induction H0; free_invert; crush; iauto.
 
   rewrite lookup_drop in *; iauto.
 Qed.
@@ -496,7 +493,7 @@ Hint Resolve free_in_context.
 Lemma typable_empty_closed : forall e t, nil |-- e t -> closed e.
 Proof.
   unfold closed. unfold not. intros.
-  destruct (free_in_context H0 H). absurdities.
+  destruct (free_in_context H0 H). crush.
 Qed.
 
 Hint Resolve typable_empty_closed.
@@ -504,7 +501,7 @@ Hint Resolve typable_empty_closed.
 Lemma sn_typable_empty : forall e t, SN t e -> nil |-- e t.
 Proof.
   intros.
-  destruct t; general.
+  destruct t; crush.
 Qed.
 
 Hint Resolve sn_typable_empty.
@@ -537,7 +534,8 @@ Qed.
 Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
                              Abs x t (close (drop x Σ) e).
 Proof.
-  induction Σ; intros; string_hammer_tac.
+  induction Σ; intros; simpl;
+  pair_destruct; string_destruct; crush.
 Qed.
 
 Hint Rewrite close_abs.
@@ -549,24 +547,24 @@ Lemma context_invariance : forall Γ Γ' e t,
 Proof.
   intros.
   generalize dependent Γ'.
-  induction H; intros; string_hammer_tac;
-  econstructor; use_ih_tac; iauto.
+  induction H; intros; crush;
+  try solve [econstructor; use_ih_tac; crush].
 
-  (* abs *)
-  intros. strings.
+  econstructor; use_ih_tac. intros.
+  simpl in *. string_destruct; crush.
   rewrite lookup_drop; iauto.
   rewrite lookup_drop; iauto.
 Qed.
 
-Ltac absurdities' :=
-  match goal with
-    |[H1 : (nil |-- ?v) _,
-           H2 : free_in _ ?v |- _] =>
-     destruct (free_in_context H2 H1)
-  end; try absurdities.
+Lemma free_closed : forall x v t, (nil |-- v t) ->
+                             free_in x v -> False.
+Proof.
+  intros; destruct (free_in_context H0 H); crush.
+Qed.
 
+Hint Resolve free_closed.
 
-Ltac use_has_type_tac :=
+Ltac has_type_invert :=
   match goal with
     |[HT : (_ |-- _) _ |- _] => inversion HT; clear HT
   end.
@@ -580,23 +578,24 @@ Proof.
   generalize dependent Γ.
   generalize dependent t.
   induction e;
-    intros; simpl; inversion H; subst; iauto.
+    intros; simpl; inversion H; subst;
+    try solve[econstructor; iauto];
+    try solve[crush; string_destruct; iauto].
 
-  (* val *)
-  use_has_type_tac. simpl in *. strings. general. subst.
+  (* var *)
+  simpl in *. string_destruct; crush.
   eapply context_invariance with (Γ := nil); iauto.
   intros.
-  absurdities'.
+  exfalso; iauto.
 
   (* abs *)
   simpl in *.
-  strings.
+  string_destruct; iauto.
   (* <> *)
-  eapply TAbs.
+  econstructor.
   use_ih_tac.
-  eapply context_invariance.
-  iauto.
-  intros. simpl. strings.
+  eapply context_invariance; iauto.
+  intros. simpl. string_destruct; crush.
 Qed.
 
 Hint Resolve substitution_preserves_typing.
@@ -616,7 +615,7 @@ Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
                           G |-- (close Σ e) t.
 Proof.
   induction 1; intros;
-  simpl in *; iauto.
+  simpl in *; iauto'.
 Qed.
 
 Hint Resolve close_preserves.
@@ -625,7 +624,8 @@ Lemma fulfills_drop : forall Γ Σ,
     Γ |= Σ ->
     forall x, (drop x Γ) |= (drop x Σ).
 Proof.
-  intros c e V. induction V; intros; simpl; strings.
+  intros c e V. induction V; intros;
+                simpl; string_destruct; crush.
 Qed.
 
 Hint Resolve fulfills_drop.
@@ -638,7 +638,8 @@ Lemma extend_drop : forall {T:Set}
     then lookup Γ' x
     else lookup (mextend Γ' Γ) x.
 Proof.
-  intros. induction Γ; general; simpl in *; strings.
+  intros. induction Γ; simpl in *; pair_destruct;
+          repeat (simpl; string_destruct; repeat iauto).
 Qed.
 
 Lemma extend_drop'' : forall Γ x t t' e,
@@ -646,12 +647,13 @@ Lemma extend_drop'' : forall Γ x t t' e,
                         (extend Γ x t) |-- e t'.
 Proof.
   intros.
-  eapply context_invariance; iauto.
-  intros.
-  use_free_tac; use_has_type_tac; simpl; strings.
+  eapply context_invariance; iauto;
+  intros;
+  free_invert; has_type_invert;
+  simpl; string_destruct; crush.
 Qed.
 
-Ltac use_step_prim_tac :=
+Ltac step_prim_invert :=
   match goal with
     |[S : step_prim _ _ |- _] => inversion S
   end.
@@ -662,12 +664,12 @@ Lemma preservation_prim_step : forall e1 e2 t,
                                  nil |-- e2 t.
 Proof.
   intros.
-  use_step_prim_tac; subst; iauto;
-  use_has_type_tac; subst; iauto.
-  eapply substitution_preserves_typing; iauto.
+  step_prim_invert; subst; iauto;
+  has_type_invert; subst; iauto;
+  eapply substitution_preserves_typing; iauto;
   match goal with
     |[H: (nil |-- _) (Fun _ _) |- _] => inversion H
-  end.
+  end;
   subst; iauto.
 Qed.
 
@@ -676,7 +678,7 @@ Lemma lookup_same : forall Γ x (t:ty) (t':ty),
                       lookup x Γ = Some t' ->
                       t = t'.
 Proof.
-  intros. rewrite H in H0. general.
+  intros. rewrite H in H0. crush.
 Qed.
 
 Hint Resolve lookup_same.
@@ -697,6 +699,8 @@ Proof.
   inversion EQ. iauto.
 Qed.
 
+Hint Resolve unique_typing.
+
 Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e1' t ->
                             nil |-- e1 t' ->
@@ -706,7 +710,7 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e2' t.
 Proof.
   intro C.
-  induction C; intros; use_plug_tac;
+  induction C; intros; plug_invert;
   iauto.
 
   (* hole *)
