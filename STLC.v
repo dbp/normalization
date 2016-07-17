@@ -2,7 +2,9 @@ Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Progra
 
 Set Implicit Arguments.
 
-Ltac iauto := try solve [intuition eauto].
+Ltac iauto := try solve [intuition (eauto 3)].
+
+Ltac iauton n := try solve [intuition (eauto n)].
 
 Inductive ty  : Set :=
 | Bool : ty
@@ -224,8 +226,6 @@ Proof.
    | exists (CIf x e2 e3)
   ]; intros; use_plug_tac; iauto.
 Qed.
-
-Hint Resolve plug_compose.
 
 Lemma step_context : forall C e1 e2,
                         step e1 e2 ->
@@ -511,7 +511,7 @@ Hint Resolve sn_typable_empty.
 
 Lemma sn_closed : forall t e, SN t e -> closed e.
 Proof.
-  iauto.
+  intros. iauto.
 Qed.
 
 Hint Resolve sn_typable_empty.
@@ -540,7 +540,7 @@ Proof.
   induction Σ; intros; string_hammer_tac.
 Qed.
 
-Hint Resolve close_abs.
+Hint Rewrite close_abs.
 
 Lemma context_invariance : forall Γ Γ' e t,
      Γ |-- e t  ->
@@ -557,8 +557,6 @@ Proof.
   rewrite lookup_drop; iauto.
   rewrite lookup_drop; iauto.
 Qed.
-
-Hint Resolve context_invariance.
 
 Ltac absurdities' :=
   match goal with
@@ -611,6 +609,7 @@ Qed.
 
 Hint Resolve sn_types.
 
+
 Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
                         forall G e t,
                           (mextend G Γ) |-- e t ->
@@ -642,8 +641,6 @@ Proof.
   intros. induction Γ; general; simpl in *; strings.
 Qed.
 
-Hint Resolve extend_drop.
-
 Lemma extend_drop'' : forall Γ x t t' e,
                         (extend (drop x Γ) x t) |-- e t' ->
                         (extend Γ x t) |-- e t'.
@@ -653,8 +650,6 @@ Proof.
   intros.
   use_free_tac; use_has_type_tac; simpl; strings.
 Qed.
-
-Hint Resolve extend_drop''.
 
 Ltac use_step_prim_tac :=
   match goal with
@@ -675,8 +670,6 @@ Proof.
   end.
   subst; iauto.
 Qed.
-
-Hint Resolve preservation_prim_step.
 
 Lemma lookup_same : forall Γ x (t:ty) (t':ty),
                       lookup x Γ = Some t ->
@@ -713,35 +706,31 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e2' t.
 Proof.
   intro C.
-  induction C; intros.
+  induction C; intros; use_plug_tac;
+  iauto.
 
-  inversion H2; subst.
-  assert (t = t'). eapply unique_typing; eauto.
-  subst.
-  inversion H3; subst; eauto.
+  (* hole *)
+  assert (t = t').
+  eapply unique_typing; iauto.
+  subst; iauto.
 
-  inversion H2; subst.
-  inversion H3; subst.
+  (* app1 *)
+  inversion H; subst;
+  econstructor.
+  eapply IHC with (e1 := e1) (e2 := e2); iauto.
+  iauto.
+
+  (* app2 *)
+  inversion H; subst;
+  econstructor;
+  iauto.
+
+  (* if *)
   inversion H; subst.
   econstructor.
-  eapply IHC.
-  eapply H7. eapply H0. eapply H1. eauto. eauto. eauto.
-
-  inversion H2; subst.
-  inversion H3; subst.
-  inversion H; subst.
-  econstructor.
-  eapply H10.
-  eapply IHC.
-  eapply H13. eapply H0. eapply H1. eauto. eauto.
-
-  inversion H2; subst.
-  inversion H3; subst.
-  inversion H; subst.
-  econstructor.
-  eapply IHC.
-  eapply H8. eapply H0. eapply H1.
-  eauto. eauto. eauto. eauto.
+  eapply IHC with (e1 := e1) (e2 := e2); iauto.
+  iauto.
+  iauto.
 Qed.
 
 Lemma typed_hole : forall C e e' t,
