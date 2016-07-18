@@ -1109,7 +1109,7 @@ Hint Rewrite lookup_mextend.
 
 Lemma TAbs_typing : forall Γ Σ x e t t',
                       Γ |= Σ ->
-                      (extend Γ x t) |-- e t' ->
+                      (extend (drop x Γ) x t) |-- e t' ->
                       nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
 Proof.
   intros.
@@ -1140,7 +1140,7 @@ Hint Resolve TAbs_app.
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
-                      (extend Γ x t) |-- e t' ->
+                      (extend (drop x Γ) x t) |-- e t' ->
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
@@ -1246,15 +1246,15 @@ Proof.
   generalize dependent Σ.
   induction H; intros.
 
-  eapply TConst_compat; eauto.
+  eapply TConst_compat; iauto.
 
-  eapply TVar_compat; eauto.
+  eapply TVar_compat; iauto.
 
-  eapply TAbs_compat; eauto.
-  eapply extend_drop'' in H. eauto.
-  intros. eapply IHhas_type. eapply FCons; eauto.
+  eapply TAbs_compat; iauto; intros;
+  eapply IHhas_type;
+  econstructor; iauto.
 
-  eapply TApp_compat; eauto.
+  eapply TApp_compat; iauto.
 
-  eapply TIf_compat; eauto.
+  eapply TIf_compat; iauto.
 Qed.
