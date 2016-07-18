@@ -9,18 +9,21 @@ Ltac iauto' := try solve [intuition eauto].
 
 Inductive ty  : Set :=
 | Bool : ty
-| Fun : ty -> ty -> ty.
+| Fun : ty -> ty -> ty
+| Product : ty -> ty -> ty.
 
 Inductive exp : Set :=
 | Var : string -> exp
 | Const : bool -> exp
 | Abs : string -> ty -> exp -> exp
 | App : exp -> exp -> exp
-| If : exp -> exp -> exp -> exp.
+| If : exp -> exp -> exp -> exp
+| Pair : exp -> exp -> exp.
 
 Inductive value : exp -> Prop :=
 | VBool : forall b, value (Const b)
-| VAbs : forall x t e, value (Abs x t e).
+| VAbs : forall x t e, value (Abs x t e)
+| VPair : forall v1 v2, value v1 -> value v2 -> value (Pair v1 v2).
 
 Definition tyenv := list (string * ty).
 
@@ -65,6 +68,10 @@ Inductive has_type : tyenv -> exp -> ty -> Prop :=
                         has_type Γ e2 t ->
                         has_type Γ e3 t ->
                         has_type Γ (If e1 e2 e3) t
+| TPair : forall Γ e1 e2 t1 t2, has_type Γ e1 t1 ->
+                           has_type Γ e2 t2 ->
+                           has_type Γ (Pair e1 e2)
+                                      (Product t1 t2)
 where "Γ '|--' e" := (has_type Γ e).
 
 Hint Constructors has_type ty exp value.
@@ -74,7 +81,9 @@ Inductive context : Set :=
 | CHole : context
 | CApp1 : context -> exp -> context
 | CApp2 : exp -> context -> context
-| CIf : context -> exp -> exp -> context.
+| CIf : context -> exp -> exp -> context
+| CPair1 : context -> exp -> context
+| CPair2 : exp -> context -> context.
 
 Hint Constructors context.
 
@@ -86,7 +95,12 @@ Inductive plug : context -> exp -> exp -> Prop :=
                        value v ->
                        plug (CApp2 v C) e (App v e')
 | PIf : forall e e' C e2 e3, plug C e e' ->
-                        plug (CIf C e2 e3) e (If e' e2 e3).
+                        plug (CIf C e2 e3) e (If e' e2 e3)
+| PPair1 : forall e e' C e2, plug C e e' ->
+                        plug (CPair1 C e2) e (Pair e' e2)
+| PPair2 : forall e e' C v, plug C e e' ->
+                       value v ->
+                       plug (CPair2 v C) e (Pair v e').
 
 Hint Constructors plug.
 
@@ -101,6 +115,7 @@ Fixpoint sub (x:string) (e:exp) (e':exp) : exp :=
     | If ec e1 e2 => If (sub x ec e')
                        (sub x e1 e')
                        (sub x e2 e')
+    | Pair e1 e2 => Pair (sub x e1 e') (sub x e2 e')
     end.
 
 Notation "'[' x ':=' s ']' t" := (sub x t s) (at level 20).
@@ -153,6 +168,8 @@ Ltac plug_invert :=
         |[H : plug (CApp1 _ _) _ _ |- _ ] => invert H
         |[H : plug (CApp2 _ _) _ _ |- _ ] => invert H
         |[H : plug (CIf _ _ _) _ _ |- _ ] => invert H
+        |[H : plug (CPair1 _ _) _ _ |- _ ] => invert H
+        |[H : plug (CPair2 _ _) _ _ |- _ ] => invert H
       end.
 
 Ltac use_ih_tac :=
@@ -172,13 +189,6 @@ Ltac use_ih_tac :=
     |[IH : forall a b, _ -> ?P b ?x a |- ?P ?b ?x ?a] =>
      eapply IH
   end.
-
-Ltac use_ex_tac :=
-  match goal with
-    |[H : exists _, _ |- _] => destruct H
-    |[H : _ -> exists _, _ |- _] => destruct H
-  end; eauto.
-
 
 Lemma plug_same : forall C x e1 e2,
                     plug C x e1 ->
@@ -213,6 +223,8 @@ Proof.
   solve [exists (App x e); iauto].
   solve [exists (App e x); iauto].
   solve [exists (If x e e0); iauto].
+  solve [exists (Pair x e); iauto].
+  solve [exists (Pair e x); iauto].
 Qed.
 
 Hint Resolve plug_exists.
@@ -234,6 +246,8 @@ Proof.
    | exists (CApp1 x e2)
    | exists (CApp2 v x)
    | exists (CIf x e2 e3)
+   | exists (CPair1 x e2)
+   | exists (CPair2 v x)
   ]; intros; plug_invert; iauto.
 Qed.
 
@@ -283,7 +297,11 @@ Inductive free_in : string -> exp -> Prop :=
 | free_if2 : forall x e1 e2 e3, free_in x e2 ->
                            free_in x (If e1 e2 e3)
 | free_if3 : forall x e1 e2 e3, free_in x e3 ->
-                           free_in x (If e1 e2 e3).
+                           free_in x (If e1 e2 e3)
+| free_pair1 : forall x e1 e2, free_in x e1 ->
+                          free_in x (Pair e1 e2)
+| free_pair2 : forall x e1 e2, free_in x e2 ->
+                          free_in x (Pair e1 e2).
 
 Hint Constructors free_in.
 
@@ -307,6 +325,7 @@ Fixpoint SN (T : ty) (t : exp) : Prop :=
   (match T with
      | Bool => True
      | Fun T1 T2 => forall s, SN T1 s -> SN T2 (App t s)
+     | Product T1 T2 => True
    end).
 
 Reserved Notation "Γ '|=' Σ" (at level 40).
@@ -361,26 +380,6 @@ Qed.
 
 Hint Rewrite string_dec_ne string_dec_refl.
 
-Ltac strings' x y :=
-  destruct (string_dec x y);
-  subst;
-  eauto;
-  simpl in *;
-  eauto.
-
-
-Ltac strings :=
-  repeat (match goal with
-            |[ H : context[string_dec ?x ?y] |- _ ] =>
-             strings' x y
-            |[ H : _ |- context[string_dec ?x ?y] ] =>
-             strings' x y
-          end; subst; eauto; simpl in *);
-  intuition;
-  autorewrite with core;
-  intuition.
-
-
 Ltac string_destruct :=
   repeat (match goal with
             |[ H : context[string_dec ?x ?y] |- _ ] =>
@@ -434,12 +433,6 @@ Proof.
 Qed.
 
 Hint Resolve close_closed.
-
-Ltac string_hammer :=
-  repeat (simpl in *;
-           crush;
-          string_destruct;
-          crush).
 
 Lemma close_var : forall Σ x e, closed_env Σ ->
                            lookup Σ x = Some e ->
@@ -691,14 +684,13 @@ Lemma unique_typing : forall e Γ t t',
                         t = t'.
 Proof.
   intro e.
-  induction e; intros; iauto; inversion H; inversion H0;
-  subst; iauto.
+  induction e; intros; iauto;
+  inversion H; inversion H0; iauto;
+  try (apply f_equal); try (apply f_equal2); iauto.
 
-  (* abs *)
-  assert (EQ : t'0 = t'1). iauto. subst. iauto.
   (* app *)
   assert (EQ : (Fun t1 t) = (Fun t0 t')). iauto.
-  inversion EQ. iauto.
+  inversion EQ; iauto.
 Qed.
 
 Hint Resolve unique_typing.
@@ -713,30 +705,15 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
 Proof.
   intro C.
   induction C; intros; plug_invert;
-  iauto.
+  iauto; try solve
+             [inversion H; subst;
+              econstructor;
+              iauto].
 
   (* hole *)
   assert (t = t').
   eapply unique_typing; iauto.
   subst; iauto.
-
-  (* app1 *)
-  inversion H; subst;
-  econstructor.
-  eapply IHC with (e1 := e1) (e2 := e2); iauto.
-  iauto.
-
-  (* app2 *)
-  inversion H; subst;
-  econstructor;
-  iauto.
-
-  (* if *)
-  inversion H; subst.
-  econstructor.
-  eapply IHC with (e1 := e1) (e2 := e2); iauto.
-  iauto.
-  iauto.
 Qed.
 
 Hint Resolve preservation_plug.
@@ -790,6 +767,15 @@ Ltac value_invert :=
     |[H : value _ |- _] => invert H
   end.
 
+Lemma plug_values : forall e v C, plug C e v ->
+                             value v ->
+                             value e.
+Proof.
+  intros.
+  induction H; inversion H0; iauto.
+Qed.
+
+Hint Resolve plug_values.
 
 Lemma values_dont_step : forall v e, value v -> ~step v e.
 Proof.
@@ -797,7 +783,11 @@ Proof.
   match goal with
     |[H: plug _ _ (Const _) |- _] => invert H
     |[H: plug _ _ (Abs _ _ _) |- _] => invert H
-  end; subst; step_prim_invert.
+    |[H: plug _ _ (Pair _ _) |- _] => invert H
+  end; subst; try (assert (value e1) by iauto;
+                   inversion H;
+                   subst);
+  step_prim_invert.
 Qed.
 
 Hint Resolve values_dont_step.
@@ -814,8 +804,15 @@ Hint Resolve step_prim_deterministic.
 
 Ltac smash :=
   repeat try match goal with
+               |[H: plug _ ?e ?v,
+                    H1: value ?v,
+                        H2: step_prim ?e _ |- _] =>
+                assert (value e) by (eapply plug_values;
+                                     iauto);
+                  exfalso; eapply values_dont_step; iauto
                |[H : App _ _ = App _ _ |- _] => invert H
                |[H : If _ _ _ = If _ _ _ |- _] => invert H
+               |[H : Pair _ _ = Pair _ _ |- _] => invert H
                |[H : plug _ _ _ |- _] => invert H; []
                |[H : plug _ _ ?v, H1 : value ?v |- _] => invert H
                |[H : step_prim _ _ |- _] => invert H
@@ -823,6 +820,10 @@ Ltac smash :=
                |[H : value (If _ _ _) |- _] => invert H
                |[H : If _ _ _ = App _ _ |- _] => invert H
                |[H : App _ _ = If _ _ _ |- _] => invert H
+               |[H : If _ _ _ = Pair _ _ |- _] => invert H
+               |[H : App _ _ = Pair _ _ |- _] => invert H
+               |[H : Pair _ _ = If _ _ _ |- _] => invert H
+               |[H : Pair _ _ = App _ _ |- _] => invert H
              end.
 
 Lemma plug_step_uniq : forall C e e1 e2,
@@ -836,13 +837,21 @@ Proof.
   intros C e e1 e2 H H0.
   induction H; intros;
   try match goal with
-    |[H1: step_prim ?e _, H2: plug _ _ ?e |- _] =>
-     invert H1; invert H2; iauto; smash
+        |[H1: step_prim ?e _, H2: plug _ _ ?e |- _] =>
+         invert H1; invert H2; iauto; smash
+      end;
+  try match goal with
+    |[H: value (Pair ?e _), H1: plug _ _ ?e |- _] =>
+     invert H; eapply plug_values in H1; invert H1; iauto
+    |[H: value (Pair _ ?e), H1: plug _ _ ?e |- _] =>
+     invert H; eapply plug_values in H1; invert H1; iauto
   end;
   match goal with
     |[H: plug _ _ (App _ _) |- _] =>
      invert H; try solve [smash]
     |[H: plug _ _ (If _ _ _) |- _] =>
+     invert H; try solve [smash]
+    |[H: plug _ _ (Pair _ _) |- _] =>
      invert H; try solve [smash]
   end;
   match goal with
@@ -854,6 +863,12 @@ Proof.
      assert (C0 = C1 /\ P) by (eapply H; eauto); crush
     |[H: _ -> forall C _ _, _ -> _ -> ?C0 = C /\ _ |-
                       (CIf ?C0 _ _ = CIf ?C1 _ _ /\ ?P)] =>
+     assert (C0 = C1 /\ P) by (eapply H; eauto); crush
+    |[H: _ -> forall C _ _, _ -> _ -> ?C0 = C /\ _ |-
+       (CPair1 ?C0 ?e0 = CPair1 ?C1 ?e0 /\ ?P)] =>
+     assert (C0 = C1 /\ P) by (eapply H; eauto); crush
+    |[H: _ -> forall C _ _, _ -> _ -> ?C0 = C /\ _ |-
+       (CPair2 ?v0 ?C0 = CPair2 ?v0 ?C1 /\ ?P)] =>
      assert (C0 = C1 /\ P) by (eapply H; eauto); crush
   end.
 Qed.
@@ -1223,6 +1238,7 @@ Proof.
        end);
   match goal with
     |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
+    |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
   end.
 Qed.
 
@@ -1236,6 +1252,50 @@ Proof.
 Qed.
 
 Hint Resolve drop_fulfills.
+
+
+Lemma close_pair : forall Σ e1 e2,
+                    close Σ (Pair e1 e2) =
+                    Pair (close Σ e1) (close Σ e2).
+Proof.
+  intro Σ.
+  induction Σ; simpl; intuition.
+Qed.
+
+Hint Rewrite close_pair.
+
+
+Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
+                      Γ |= Σ ->
+                      SN t1 (close Σ e1) ->
+                      SN t2 (close Σ e2) ->
+                      SN (Product t1 t2)
+                         (close Σ (Pair e1 e2)).
+Proof.
+  intros. crush;
+  repeat match goal with
+           |[H: SN _ _ |- _] =>
+            eapply sn_halts in H; invert H
+         end;
+  crush;
+  match goal with
+    |[H1: multi step ?e1 ?v1,
+          H2: multi step ?e2 ?v2 |-
+      halts (Pair ?e1 ?e2)] => eexists (Pair v1 v2)
+  end;
+  crush;
+  eapply multi_trans with (b := (Pair x0 (close Σ e2)));
+  match goal with
+    |[H: multi step ?e ?v |-
+      multi step (Pair ?e _) (Pair ?v _)] =>
+     eapply (multi_context H); iauto
+    |[H: multi step ?e ?v |-
+      multi step (Pair _ ?e) (Pair _ ?v)] =>
+     eapply (multi_context H); iauto
+  end.
+Qed.
+
+
 
 Theorem fundamental : forall e t Γ Σ,
                         Γ |-- e t ->
@@ -1257,4 +1317,6 @@ Proof.
   eapply TApp_compat; iauto.
 
   eapply TIf_compat; iauto.
+
+  eapply TPair_compat; iauto.
 Qed.
