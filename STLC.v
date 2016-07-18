@@ -6,6 +6,16 @@ Set Implicit Arguments.
 
 Ltac iauto := try solve [intuition (eauto 3)].
 Ltac iauto' := try solve [intuition eauto].
+Ltac invert H := inversion H; clear H; try subst.
+
+(**************************************)
+(************ 1. SYNTAX ***************)
+(**************************************)
+
+(** This section contains the types and terms for
+    out simply typed lambda calculus (which has bools,
+    if, and pairs).
+*)
 
 Inductive ty  : Set :=
 | Bool : ty
@@ -24,6 +34,18 @@ Inductive value : exp -> Prop :=
 | VBool : forall b, value (Const b)
 | VAbs : forall x t e, value (Abs x t e)
 | VPair : forall v1 v2, value v1 -> value v2 -> value (Pair v1 v2).
+
+(**************************************)
+(**** 2. SUBSTITUTION/ENVIRONMENTS ****)
+(**************************************)
+
+(** This section contains definitions of environments,
+    extension, substitution, what it means to be
+    closed, etc.
+
+    In this presentation, environments are represented
+    as lists, _not_ as functions as is sometimes done.
+*)
 
 Definition tyenv := list (string * ty).
 
@@ -54,6 +76,71 @@ Fixpoint drop {T : Set}
     | cons (y,t) rest => if string_dec x y then drop x rest else cons (y,t) (drop x rest)
   end.
 
+Fixpoint sub (x:string) (e:exp) (e':exp) : exp :=
+  match e with
+    | Var y => if string_dec y x then e' else e
+    | Const b => e
+    | Abs y t body => if string_dec y x
+                     then e
+                     else Abs y t (sub x body e')
+    | App e1 e2 => App (sub x e1 e') (sub x e2 e')
+    | If ec e1 e2 => If (sub x ec e')
+                       (sub x e1 e')
+                       (sub x e2 e')
+    | Pair e1 e2 => Pair (sub x e1 e') (sub x e2 e')
+    end.
+
+Notation "'[' x ':=' s ']' t" := (sub x t s) (at level 20).
+
+Inductive free_in : string -> exp -> Prop :=
+| free_var : forall x, free_in x (Var x)
+| free_abs : forall x t y e, free_in x e ->
+                      x <> y ->
+                      free_in x (Abs y t e)
+| free_app1 : forall x e1 e2, free_in x e1 ->
+                         free_in x (App e1 e2)
+| free_app2 : forall x e1 e2, free_in x e2 ->
+                         free_in x (App e1 e2)
+| free_if1 : forall x e1 e2 e3, free_in x e1 ->
+                           free_in x (If e1 e2 e3)
+| free_if2 : forall x e1 e2 e3, free_in x e2 ->
+                           free_in x (If e1 e2 e3)
+| free_if3 : forall x e1 e2 e3, free_in x e3 ->
+                           free_in x (If e1 e2 e3)
+| free_pair1 : forall x e1 e2, free_in x e1 ->
+                          free_in x (Pair e1 e2)
+| free_pair2 : forall x e1 e2, free_in x e2 ->
+                          free_in x (Pair e1 e2).
+
+Hint Constructors free_in.
+
+Ltac free_invert :=
+  match goal with
+    |[H : free_in _ _ |- _] => invert H
+  end.
+
+Definition closed t := forall x, ~ free_in x t.
+
+Fixpoint closed_env (e:venv) :=
+  match e with
+    | nil => True
+    | cons (_,e1) en => closed e1 /\ closed_env en
+  end.
+
+Fixpoint close (Σ : venv) (e : exp) : exp :=
+  match Σ with
+    |nil => e
+    |cons (x,v) Σ' => close Σ' ([x:=v]e)
+  end.
+
+
+(**************************************)
+(******** 3. TYPING JUDGEMENT *********)
+(**************************************)
+
+(** This section contains the main typing judgement.
+*)
+
 Reserved Notation "Γ '|--' e" (at level 10).
 
 Inductive has_type : tyenv -> exp -> ty -> Prop :=
@@ -76,6 +163,15 @@ where "Γ '|--' e" := (has_type Γ e).
 
 Hint Constructors has_type ty exp value.
 
+
+
+(**************************************)
+(****** 4. EVALUATION RELATION ********)
+(**************************************)
+
+(** This section contains the evaluation relation for
+    the language, which is based on evaluation contexts.
+*)
 
 Inductive context : Set :=
 | CHole : context
@@ -103,22 +199,6 @@ Inductive plug : context -> exp -> exp -> Prop :=
                        plug (CPair2 v C) e (Pair v e').
 
 Hint Constructors plug.
-
-Fixpoint sub (x:string) (e:exp) (e':exp) : exp :=
-  match e with
-    | Var y => if string_dec y x then e' else e
-    | Const b => e
-    | Abs y t body => if string_dec y x
-                     then e
-                     else Abs y t (sub x body e')
-    | App e1 e2 => App (sub x e1 e') (sub x e2 e')
-    | If ec e1 e2 => If (sub x ec e')
-                       (sub x e1 e')
-                       (sub x e2 e')
-    | Pair e1 e2 => Pair (sub x e1 e') (sub x e2 e')
-    end.
-
-Notation "'[' x ':=' s ']' t" := (sub x t s) (at level 20).
 
 
 Inductive step_prim : exp -> exp -> Prop :=
@@ -159,7 +239,60 @@ Qed.
 
 Hint Resolve multi_trans.
 
-Ltac invert H := inversion H; clear H; try subst.
+
+(**************************************)
+(******* 5. LOGICAL RELATION **********)
+(**************************************)
+
+(** We define the primary relation, which due to
+    positivity restrictions is a fixpoint rather than
+    an inductive type, and also what it means for a
+    substitution to contain values in the relation.
+*)
+
+Definition halts  (e:exp) : Prop :=
+  exists e', multi step e e' /\  value e'.
+
+Fixpoint SN (T : ty) (t : exp) : Prop :=
+  (nil |-- t T) /\ halts t /\
+  (match T with
+     | Bool => True
+     | Fun T1 T2 => forall s, SN T1 s -> SN T2 (App t s)
+     | Product T1 T2 => True
+   end).
+
+Reserved Notation "Γ '|=' Σ" (at level 40).
+
+Inductive fulfills : tyenv -> venv -> Prop :=
+| FNil : fulfills nil nil
+| FCons : forall x t e Γ Σ,
+            SN t e ->
+            fulfills Γ Σ ->
+            fulfills (cons (x,t) Γ) (cons (x,e) Σ)
+where "Γ '|=' Σ" := (fulfills Γ Σ).
+
+Hint Constructors fulfills.
+
+
+(**************************************)
+(******** 6. MISC. PROPERTIES *********)
+(**************************************)
+
+(** This section contains a bunch of intermediate results
+    about substition, evaluation contexts, etc.
+
+    These mostly correspond to properties that are
+    ellided in paper proofs, or at least, defined as
+    proceeding by "straightforward induction on X".
+
+    On first reading, you should probaby skip this
+    section, proceeding either to the next section,
+    which covers more interesting properties of the
+    language (preservation, determinism, anti-reduction),
+    etc, or probably skip right to the section titled
+    "COMPATIBILITY LEMMAS", as those are the lemmas
+    that are motivate all the other intermediate results.
+ *)
 
 Ltac plug_invert :=
   try repeat
@@ -283,68 +416,7 @@ Proof.
   assert (H5: step e1' x); iauto.
 Qed.
 
-Inductive free_in : string -> exp -> Prop :=
-| free_var : forall x, free_in x (Var x)
-| free_abs : forall x t y e, free_in x e ->
-                      x <> y ->
-                      free_in x (Abs y t e)
-| free_app1 : forall x e1 e2, free_in x e1 ->
-                         free_in x (App e1 e2)
-| free_app2 : forall x e1 e2, free_in x e2 ->
-                         free_in x (App e1 e2)
-| free_if1 : forall x e1 e2 e3, free_in x e1 ->
-                           free_in x (If e1 e2 e3)
-| free_if2 : forall x e1 e2 e3, free_in x e2 ->
-                           free_in x (If e1 e2 e3)
-| free_if3 : forall x e1 e2 e3, free_in x e3 ->
-                           free_in x (If e1 e2 e3)
-| free_pair1 : forall x e1 e2, free_in x e1 ->
-                          free_in x (Pair e1 e2)
-| free_pair2 : forall x e1 e2, free_in x e2 ->
-                          free_in x (Pair e1 e2).
 
-Hint Constructors free_in.
-
-Ltac free_invert :=
-  match goal with
-    |[H : free_in _ _ |- _] => invert H
-  end.
-
-Definition closed t := forall x, ~ free_in x t.
-
-Fixpoint closed_env (e:venv) :=
-  match e with
-    | nil => True
-    | cons (_,e1) en => closed e1 /\ closed_env en
-  end.
-
-Definition halts  (e:exp) : Prop :=  exists e', multi step e e' /\  value e'.
-
-Fixpoint SN (T : ty) (t : exp) : Prop :=
-  (nil |-- t T) /\ halts t /\
-  (match T with
-     | Bool => True
-     | Fun T1 T2 => forall s, SN T1 s -> SN T2 (App t s)
-     | Product T1 T2 => True
-   end).
-
-Reserved Notation "Γ '|=' Σ" (at level 40).
-
-Inductive fulfills : tyenv -> venv -> Prop :=
-| FNil : fulfills nil nil
-| FCons : forall x t e Γ Σ,
-            SN t e ->
-            fulfills Γ Σ ->
-            fulfills (cons (x,t) Γ) (cons (x,e) Σ)
-where "Γ '|=' Σ" := (fulfills Γ Σ).
-
-Hint Constructors fulfills.
-
-Fixpoint close (Σ : venv) (e : exp) : exp :=
-  match Σ with
-    |nil => e
-    |cons (x,v) Σ' => close Σ' ([x:=v]e)
-  end.
 
 Lemma close_const : forall Σ b, close Σ (Const b) = (Const b).
 Proof.
@@ -392,13 +464,6 @@ Ltac pair_destruct :=
   repeat (match goal with
             |[ a : _ * _ |- _] => destruct a
           end).
-
-Lemma TConst_compat : forall Γ Σ b, Γ |= Σ ->
-                               SN Bool (close Σ (Const b)).
-Proof.
-  crush.
-Qed.
-
 
 Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
                            Γ |= Σ ->
@@ -515,14 +580,6 @@ Qed.
 
 Hint Resolve fulfill_closed.
 
-Lemma TVar_compat : forall Γ Σ x t, Γ |= Σ ->
-                               lookup Γ x = Some t ->
-                                   SN t (close Σ (Var x)).
-Proof.
-  intros.
-  destruct (lookup_fulfill_v H x H0); iauto.
-  rewrite close_var with (e := x0); iauto.
-Qed.
 
 Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
                              Abs x t (close (drop x Σ) e).
@@ -646,6 +703,250 @@ Proof.
   simpl; string_destruct; crush.
 Qed.
 
+Lemma lookup_same : forall Γ x (t:ty) (t':ty),
+                      lookup x Γ = Some t ->
+                      lookup x Γ = Some t' ->
+                      t = t'.
+Proof.
+  intros. rewrite H in H0. crush.
+Qed.
+
+Hint Resolve lookup_same.
+
+
+Lemma typed_hole : forall C e e' t,
+                     nil |-- e t ->
+                     plug C e' e ->
+                     exists t', nil |-- e' t'.
+Proof.
+  intros.
+  generalize dependent t.
+  induction H0; intros;
+  plug_invert; has_type_invert;
+  iauto.
+Qed.
+
+Hint Resolve typed_hole.
+
+Ltac step_invert :=
+  match goal with
+    |[H : step _ _ |- _] => invert H
+  end.
+
+Ltac value_invert :=
+  match goal with
+    |[H : value _ |- _] => invert H
+  end.
+
+Lemma plug_values : forall e v C, plug C e v ->
+                             value v ->
+                             value e.
+Proof.
+  intros.
+  induction H; inversion H0; iauto.
+Qed.
+
+Hint Resolve plug_values.
+
+
+
+Lemma multi_subst : forall x v1 v2 e,
+                      closed v1 -> closed v2 ->
+                      [x:=v1]([x:=v2]e) = [x:=v2]e.
+Proof.
+  intros.
+  induction e; iauto; try solve[crush];
+  simpl; string_destruct; iauto; simpl;
+  try match goal with
+    |[H: closed ?v |- [_ := _]?v = ?v] =>
+     rewrite sub_closed; unfold closed in H; iauto
+  end;
+  string_destruct; iauto; crush.
+Qed.
+
+Hint Rewrite multi_subst.
+
+Ltac closed_tac :=
+  match goal with
+    |[H: closed ?v |- [_ := _]?v = ?v] =>
+     rewrite sub_closed; unfold closed in H; iauto
+    |[H: closed ?v |- ?v = [_ := _]?v] =>
+     rewrite sub_closed; unfold closed in H; iauto
+  end.
+
+Lemma swap_sub : forall x1 x2 v1 v2 e,
+                   x1 <> x2 ->
+                   closed v1 ->
+                   closed v2 ->
+                   [x1:=v1]([x2:=v2]e) = [x2:=v2]([x1:=v1]e).
+Proof.
+  intros.
+  induction e;
+  simpl;
+  string_destruct; simpl; iauto;
+  string_destruct; iauto;
+  try closed_tac; iauto;
+  string_destruct; iauto;
+  crush.
+Qed.
+
+Hint Rewrite swap_sub.
+
+Lemma sub_close: forall Σ x v e,
+                      closed v ->
+                      closed_env Σ ->
+                      close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
+Proof.
+  intro Σ.
+  induction Σ; intros; simpl; pair_destruct; iauto;
+  string_destruct; simpl;
+  try solve[rewrite multi_subst; iauto; crush];
+  try solve[rewrite swap_sub; crush].
+Qed.
+
+Lemma multistep_App2 : forall v e e',
+                         value v ->
+                         multi step e e' ->
+                         multi step (App v e) (App v e').
+Proof.
+  intros.
+  eapply multi_context with (e1 := e) (e2 := e'); eauto.
+Qed.
+
+Lemma sub_close_extend :
+  forall x v e Σ,
+    closed v ->
+    closed_env Σ ->
+    [x:=v](close (drop x Σ) e) =
+    close (extend (drop x Σ) x v) e.
+Proof.
+  intros.
+  generalize dependent e.
+  simpl.
+  induction Σ; intros; iauto;
+  pair_destruct;
+  simpl; string_destruct; simpl;
+  try rewrite swap_sub; crush.
+Qed.
+
+Lemma drop_sub : forall Σ x v e,
+                   closed v ->
+                   closed_env Σ ->
+                   close (drop x Σ) ([x:=v]e) =
+                   close Σ ([x:=v]e).
+Proof.
+  intro Σ.
+  induction Σ; intros;
+  pair_destruct; iauto; simpl; string_destruct; simpl;
+  try solve [rewrite multi_subst; crush];
+  try solve [rewrite swap_sub; crush].
+Qed.
+
+Lemma extend_drop' : forall Σ (x:string) (v:exp) e,
+                       closed_env Σ ->
+                       closed v ->
+                       close (extend (drop x Σ) x v) e
+                       = close (cons (x,v) Σ) e.
+Proof.
+  induction Σ; intros; iauto; pair_destruct; simpl;
+  string_destruct; simpl;
+  [rewrite drop_sub; iauto;
+   try solve [rewrite multi_subst; iauto; crush];
+   crush
+  |rewrite swap_sub; crush].
+Qed.
+
+Hint Rewrite extend_drop'.
+
+Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t,
+                        x <> x0 ->
+                        lookup ((x, t) :: Γ) x0 =
+                        lookup (mextend (cons (x, t) nil) Γ) x0.
+Proof.
+  intros.
+  simpl.
+  string_destruct; iauto.
+  induction Γ; try solve [crush];
+  repeat (simpl; string_destruct; pair_destruct; iauto).
+Qed.
+
+Hint Rewrite lookup_mextend.
+
+
+Lemma close_app : forall Σ e1 e2,
+                    close Σ (App e1 e2) =
+                    App (close Σ e1) (close Σ e2).
+Proof.
+  intro Σ.
+  induction Σ; simpl; intuition.
+Qed.
+
+Hint Rewrite close_app.
+
+
+Lemma close_if : forall Σ e1 e2 e3,
+                    close Σ (If e1 e2 e3) =
+                    If (close Σ e1) (close Σ e2) (close Σ e3).
+Proof.
+  intro Σ.
+  induction Σ; simpl; intuition.
+Qed.
+
+Hint Rewrite close_if.
+
+Lemma drop_fulfills : forall Γ Σ x,
+                        Γ |= Σ ->
+                        drop x Γ |= drop x Σ.
+Proof.
+  intros.
+  induction H; iauto.
+Qed.
+
+Hint Resolve drop_fulfills.
+
+
+Lemma close_pair : forall Σ e1 e2,
+                    close Σ (Pair e1 e2) =
+                    Pair (close Σ e1) (close Σ e2).
+Proof.
+  intro Σ.
+  induction Σ; simpl; intuition.
+Qed.
+
+Hint Rewrite close_pair.
+
+(**************************************)
+(**** 7. ANTI-REDUCTION/DETERMINISM ***)
+(**************************************)
+
+(** This section contains interesting results about
+    the language - primarily, preservation of types (that
+    if a well-typed term steps to another term which is
+    well typed, at the same type) and also of halting
+    (that if a term halts, anything it steps to will
+    halt as well), anti-reduction (that if a term
+    is well typed and steps to a term that is
+    in the logical relation, then the original term
+    must have been as well, determinism (that if two
+    terms step, they must step to the same term).
+
+    We also show that any well typed term has a unique
+    type (which, interesting, is what requires that we
+    provide a type binder on Abs), which is needed for
+    the type preservation result.
+
+    Of these, the result that perhaps seems the least
+    necessary is determinism. But we need it to show
+    preservation of halting, as we argue that the
+    steps that allows a term e to halt must include
+    the term e', and thus e' will halt as well. It's
+    likely the result could work without determinism,
+    but the definition of halting would probably need
+    to change, and since STLC is deterministic, it's a
+    reasonable property to check.
+*)
+
+
 Ltac step_prim_invert :=
   match goal with
     |[S : step_prim _ _ |- _] => invert S
@@ -668,15 +969,6 @@ Qed.
 
 Hint Resolve preservation_prim_step.
 
-Lemma lookup_same : forall Γ x (t:ty) (t':ty),
-                      lookup x Γ = Some t ->
-                      lookup x Γ = Some t' ->
-                      t = t'.
-Proof.
-  intros. rewrite H in H0. crush.
-Qed.
-
-Hint Resolve lookup_same.
 
 Lemma unique_typing : forall e Γ t t',
                         Γ |-- e t ->
@@ -718,20 +1010,6 @@ Qed.
 
 Hint Resolve preservation_plug.
 
-Lemma typed_hole : forall C e e' t,
-                     nil |-- e t ->
-                     plug C e' e ->
-                     exists t', nil |-- e' t'.
-Proof.
-  intros.
-  generalize dependent t.
-  induction H0; intros;
-  plug_invert; has_type_invert;
-  iauto.
-Qed.
-
-Hint Resolve typed_hole.
-
 Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
                                      step e1 e2 ->
                                      nil |-- e2 t.
@@ -757,25 +1035,29 @@ Qed.
 
 Hint Resolve preservation.
 
-Ltac step_invert :=
-  match goal with
-    |[H : step _ _ |- _] => invert H
-  end.
 
-Ltac value_invert :=
-  match goal with
-    |[H : value _ |- _] => invert H
-  end.
-
-Lemma plug_values : forall e v C, plug C e v ->
-                             value v ->
-                             value e.
+Lemma anti_reduct : forall e' e t, multi step e e' ->
+                              SN t e' ->
+                              nil |-- e t ->
+                              SN t e.
 Proof.
   intros.
-  induction H; inversion H0; iauto.
+  generalize dependent e.
+  generalize dependent e'.
+  induction t; intros; unfold SN; crush;
+  try solve[match goal with
+              |[H: halts _ |- halts _] => invert H
+            end;
+             crush;
+             unfold halts;
+             exists x; iauto];
+  fold SN in *; intros;
+  eapply IHt2; iauto;
+  eapply multi_context with (C := CApp1 CHole s);
+  iauto.
 Qed.
 
-Hint Resolve plug_values.
+Hint Resolve anti_reduct.
 
 Lemma values_dont_step : forall v e, value v -> ~step v e.
 Proof.
@@ -914,31 +1196,6 @@ Qed.
 
 Hint Resolve step_preserves_halting.
 
-Ltac use_sn :=
-  match goal with
-    | [H : SN _ _ |- _ ] => unfold SN in H; fold SN in H
-  end;
-  repeat match goal with
-           | [ H : _ /\ _ |- _ ] => destruct H
-         end;
-  unfold SN; fold SN; intuition.
-
-
-Ltac use_preservation :=
-  match goal with
-    | [ H : nil |-- ?e ?t, S : step ?e ?u |- nil |-- ?u ?t ] =>
-      eapply preservation; repeat eassumption
-  end.
-
-Ltac use_preserve_halting :=
-  match goal with
-    | [ H : step ?T ?U, H1 : halts ?T |- halts ?U ] =>
-      eapply (step_preserves_halting T U); repeat eassumption
-    | [ H : multi step ?T ?U, H1 : halts ?T |- halts ?U ] =>
-      eapply MultiStep; eauto; eapply (step_preserves_halting T U); repeat eassumption
-  end.
-
-
 Lemma step_preserves_sn : forall t e e',
                             step e e' ->
                             SN t e ->
@@ -966,161 +1223,42 @@ Proof.
 Qed.
 
 
-Lemma anti_reduct : forall e' e t, multi step e e' ->
-                              SN t e' ->
-                              nil |-- e t ->
-                              SN t e.
+(**************************************)
+(****** 8. COMPATIBILITY LEMMAS *******)
+(**************************************)
+
+(** This section contains the primary results,
+    which show for each term in the language, if
+    it is well typed then it is in the logical
+    relation.
+
+    The most interesting one is certainly TAbs,
+    which proceeds primarily by appealing to
+    anti-reduction, but TIf has it's own trick,
+    because in order to show that it halts, we have
+    to step it to the intermediate term where the head
+    position is a (Const b) value, and then handle each
+    case separately by appealing to the corresponding
+    hypothesis for the then or else branches.
+*)
+
+
+Lemma TConst_compat : forall Γ Σ b,
+                        Γ |= Σ ->
+                        SN Bool (close Σ (Const b)).
 Proof.
-  intros.
-  generalize dependent e.
-  generalize dependent e'.
-  induction t; intros; unfold SN; crush;
-  try solve[match goal with
-              |[H: halts _ |- halts _] => invert H
-            end;
-             crush;
-             unfold halts;
-             exists x; iauto];
-  fold SN in *; intros;
-  eapply IHt2; iauto;
-  eapply multi_context with (C := CApp1 CHole s);
-  iauto.
-Qed.
-
-Hint Resolve anti_reduct.
-
-Lemma anti_reduct' : forall e' e t,
-                       nil |-- e t ->
-                       multi step e e' ->
-                              SN t e' ->
-                              SN t e.
-Proof.
-  iauto.
-Qed.
-
-Hint Resolve anti_reduct'.
-
-Lemma multi_subst : forall x v1 v2 e,
-                      closed v1 -> closed v2 ->
-                      [x:=v1]([x:=v2]e) = [x:=v2]e.
-Proof.
-  intros.
-  induction e; iauto; try solve[crush];
-  simpl; string_destruct; iauto; simpl;
-  try match goal with
-    |[H: closed ?v |- [_ := _]?v = ?v] =>
-     rewrite sub_closed; unfold closed in H; iauto
-  end;
-  string_destruct; iauto; crush.
-Qed.
-
-Hint Rewrite multi_subst.
-
-Ltac closed_tac :=
-  match goal with
-    |[H: closed ?v |- [_ := _]?v = ?v] =>
-     rewrite sub_closed; unfold closed in H; iauto
-    |[H: closed ?v |- ?v = [_ := _]?v] =>
-     rewrite sub_closed; unfold closed in H; iauto
-  end.
-
-Lemma swap_sub : forall x1 x2 v1 v2 e,
-                   x1 <> x2 ->
-                   closed v1 ->
-                   closed v2 ->
-                   [x1:=v1]([x2:=v2]e) = [x2:=v2]([x1:=v1]e).
-Proof.
-  intros.
-  induction e;
-  simpl;
-  string_destruct; simpl; iauto;
-  string_destruct; iauto;
-  try closed_tac; iauto;
-  string_destruct; iauto;
   crush.
 Qed.
 
-Hint Rewrite swap_sub.
-
-Lemma sub_close: forall Σ x v e,
-                      closed v ->
-                      closed_env Σ ->
-                      close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
-Proof.
-  intro Σ.
-  induction Σ; intros; simpl; pair_destruct; iauto;
-  string_destruct; simpl;
-  try solve[rewrite multi_subst; iauto; crush];
-  try solve[rewrite swap_sub; crush].
-Qed.
-
-Lemma multistep_App2 : forall v e e',
-                         value v ->
-                         multi step e e' ->
-                         multi step (App v e) (App v e').
+Lemma TVar_compat : forall Γ Σ x t,
+                      Γ |= Σ ->
+                      lookup Γ x = Some t ->
+                      SN t (close Σ (Var x)).
 Proof.
   intros.
-  eapply multi_context with (e1 := e) (e2 := e'); eauto.
+  destruct (lookup_fulfill_v H x H0); iauto.
+  rewrite close_var with (e := x0); iauto.
 Qed.
-
-Lemma sub_close_extend :
-  forall x v e Σ,
-    closed v ->
-    closed_env Σ ->
-    [x:=v](close (drop x Σ) e) =
-    close (extend (drop x Σ) x v) e.
-Proof.
-  intros.
-  generalize dependent e.
-  simpl.
-  induction Σ; intros; iauto;
-  pair_destruct;
-  simpl; string_destruct; simpl;
-  try rewrite swap_sub; crush.
-Qed.
-
-Lemma drop_sub : forall Σ x v e,
-                   closed v ->
-                   closed_env Σ ->
-                   close (drop x Σ) ([x:=v]e) =
-                   close Σ ([x:=v]e).
-Proof.
-  intro Σ.
-  induction Σ; intros;
-  pair_destruct; iauto; simpl; string_destruct; simpl;
-  try solve [rewrite multi_subst; crush];
-  try solve [rewrite swap_sub; crush].
-Qed.
-
-Lemma extend_drop' : forall Σ (x:string) (v:exp) e,
-                       closed_env Σ ->
-                       closed v ->
-                       close (extend (drop x Σ) x v) e
-                       = close (cons (x,v) Σ) e.
-Proof.
-  induction Σ; intros; iauto; pair_destruct; simpl;
-  string_destruct; simpl;
-  [rewrite drop_sub; iauto;
-   try solve [rewrite multi_subst; iauto; crush];
-   crush
-  |rewrite swap_sub; crush].
-Qed.
-
-Hint Rewrite extend_drop'.
-
-Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t,
-                        x <> x0 ->
-                        lookup ((x, t) :: Γ) x0 =
-                        lookup (mextend (cons (x, t) nil) Γ) x0.
-Proof.
-  intros.
-  simpl.
-  string_destruct; iauto.
-  induction Γ; try solve [crush];
-  repeat (simpl; string_destruct; pair_destruct; iauto).
-Qed.
-
-Hint Rewrite lookup_mextend.
 
 Lemma TAbs_typing : forall Γ Σ x e t t',
                       Γ |= Σ ->
@@ -1173,16 +1311,6 @@ Proof.
   eapply multi_context with (e1 := s) (e2 := xh); iauto.
 Qed.
 
-Lemma close_app : forall Σ e1 e2,
-                    close Σ (App e1 e2) =
-                    App (close Σ e1) (close Σ e2).
-Proof.
-  intro Σ.
-  induction Σ; simpl; intuition.
-Qed.
-
-Hint Rewrite close_app.
-
 Lemma TApp_compat : forall Γ Σ e1 e2 t t',
                       Γ |= Σ ->
                       SN (Fun t t') (close Σ e1) ->
@@ -1191,16 +1319,6 @@ Lemma TApp_compat : forall Γ Σ e1 e2 t t',
 Proof.
   intros; crush.
 Qed.
-
-Lemma close_if : forall Σ e1 e2 e3,
-                    close Σ (If e1 e2 e3) =
-                    If (close Σ e1) (close Σ e2) (close Σ e3).
-Proof.
-  intro Σ.
-  induction Σ; simpl; intuition.
-Qed.
-
-Hint Rewrite close_if.
 
 Ltac branch boo e ife :=
     eapply anti_reduct with (e' := e); crush;
@@ -1242,29 +1360,6 @@ Proof.
   end.
 Qed.
 
-
-Lemma drop_fulfills : forall Γ Σ x,
-                        Γ |= Σ ->
-                        drop x Γ |= drop x Σ.
-Proof.
-  intros.
-  induction H; iauto.
-Qed.
-
-Hint Resolve drop_fulfills.
-
-
-Lemma close_pair : forall Σ e1 e2,
-                    close Σ (Pair e1 e2) =
-                    Pair (close Σ e1) (close Σ e2).
-Proof.
-  intro Σ.
-  induction Σ; simpl; intuition.
-Qed.
-
-Hint Rewrite close_pair.
-
-
 Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                       Γ |= Σ ->
                       SN t1 (close Σ e1) ->
@@ -1296,6 +1391,19 @@ Proof.
 Qed.
 
 
+(**************************************)
+(****** 9. FUNDAMENTAL THEOREM ********)
+(**************************************)
+
+(** The fundamental theorem simply states that
+    a well-typed open term, when closed with a
+    substitution that contains values that are
+    in the logical relation, will be in the logical
+    relation.
+
+    We can then apply that (trivially) to an empty
+    environment to get that any closed term halts.
+*)
 
 Theorem fundamental : forall e t Γ Σ,
                         Γ |-- e t ->
@@ -1319,4 +1427,13 @@ Proof.
   eapply TIf_compat; iauto.
 
   eapply TPair_compat; iauto.
+Qed.
+
+Theorem strong_normalization : forall e t,
+                                 nil |-- e t ->
+                                 halts e.
+Proof.
+  intros.
+  assert (SN t (close nil e)). eapply fundamental; iauto.
+  eapply sn_halts; iauto.
 Qed.
