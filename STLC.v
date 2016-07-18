@@ -1107,6 +1107,37 @@ Qed.
 
 Hint Rewrite lookup_mextend.
 
+Lemma TAbs_typing : forall Γ Σ x e t t',
+                      Γ |= Σ ->
+                      (extend Γ x t) |-- e t' ->
+                      nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
+Proof.
+  intros.
+  econstructor. eapply close_preserves.
+  eapply fulfills_drop. iauto.
+  eapply context_invariance. iauto.
+  intros. simpl. rewrite extend_drop.
+  string_destruct. simpl. crush. iauto.
+  iauto. unfold extend. rewrite <- lookup_mextend.
+  simpl. string_destruct; iauto. iauto.
+Qed.
+
+Hint Resolve TAbs_typing.
+
+Lemma TAbs_app : forall x t Σ e xh,
+                   value xh ->
+                   closed xh ->
+                   closed_env Σ ->
+                   multi step (App (Abs x t (close (drop x Σ) e)) xh)
+                         (close (extend (drop x Σ) x xh) e).
+Proof.
+  intros. econstructor. econstructor. econstructor.
+  econstructor. econstructor. iauto. simpl.
+  rewrite sub_close_extend; crush.
+Qed.
+
+Hint Resolve TAbs_app.
+
 Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
                       (extend Γ x t) |-- e t' ->
@@ -1114,69 +1145,17 @@ Lemma TAbs_compat : forall Γ Σ x e t t',
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
   intros.
-  assert (WT: nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t')).
-    { eapply TAbs. eapply close_preserves.
-      { eapply fulfills_drop; eauto. }
-      eapply context_invariance.
-      { apply H0. }
-      intros.
-      unfold extend. rewrite extend_drop. destruct (string_dec x0 x).
-      + subst. simpl. rewrite string_dec_refl. rewrite string_dec_refl. reflexivity.
-      + assert (drop x (nil : list (string * ty)) = nil); eauto. rewrite H3. eapply lookup_mextend; eauto.
-    }
-    simpl. split. rewrite close_abs.
-    auto.
-    split.
-    apply halts_value. rewrite close_abs. apply VAbs.
+  crush; iauto.
 
-    intros.
-     destruct (sn_halts t s H2) as [v [P Q]].
-     pose proof (multistep_preserves_sn t P H2).
-     eapply anti_reduct' with (close (cons (x,v) Σ) e).
-     eapply TApp. rewrite close_abs.
-     apply sn_types; auto.
+  assert (HH: halts s) by iauto.
+  inversion HH as [xh MS]. crush.
+  assert (SN t xh) by (eapply multistep_preserves_sn;
+                       iauto).
+  assert (closed xh) by (eapply sn_closed; iauto).
 
-     simpl.
-     split. eauto. split. eapply halts_value. eauto.
-     intros.
-     assert (halts s0). eapply sn_halts. eapply H4.
-     inversion H5.
-     eapply anti_reduct' with (e' := close (extend (drop x Σ) x x0) e).
-     eapply TApp. eapply WT. eapply sn_types; eauto.
-     eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) x0)).
-     inversion H6. clear H6.
-     eapply multi_context with (e1 := s0) (e2 := x0); eauto.
-
-     eapply MultiStep. eapply Step. eapply PHole. eapply PHole. eapply SBeta. inversion H6; eauto.
-     rewrite sub_close_extend. eapply MultiRefl.
-     eapply sn_closed. eapply multistep_preserves_sn.
-     inversion H6.
-     eapply H7. eauto.
-
-     eapply fulfill_closed; eauto.
-
-     eapply H1. eapply multistep_preserves_sn.
-     inversion H6.
-     eapply H7. eauto.
-
-     eapply sn_types. eapply H2.
-
-     eapply multi_trans.  eapply multistep_App2; eauto.
-
-     rewrite close_abs. eapply VAbs.
-
-     eapply MultiStep.
-     eapply Step. eapply PHole. eapply PHole.
-     rewrite close_abs.
-     eapply SBeta. eauto. simpl.
-     rewrite sub_close. eapply MultiRefl.
-     eapply sn_closed; eauto.
-     eapply fulfill_closed; eauto.
-
-     rewrite <- extend_drop'.
-     eapply H1. assumption.
-     eapply fulfill_closed; eauto.
-     eapply sn_closed; eauto.
+  eapply anti_reduct with (e' := close (extend (drop x Σ) x xh) e); try solve [crush]; try solve [iauto'].
+  eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) xh)); iauto;
+  eapply multi_context with (e1 := s) (e2 := xh); iauto.
 Qed.
 
 Lemma close_app : forall Σ e1 e2,
