@@ -1,5 +1,17 @@
 Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Program.Equality.
 
+(** NOTE(dbp 2016-07-19):
+
+Some obvious improvements that could be made to this presentation:
+
+1. Localize Hints inside lemmas, so it is clearer what the dependency
+   is between them. This might not have to be done for _all_ lemmas,
+   but should probably be the default.
+2. Use Hint Extern rather than ad-hoc tactics like pair_destruct and
+   string_destruct.
+
+*)
+
 Load CpdtTactics.
 
 Set Implicit Arguments.
