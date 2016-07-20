@@ -1341,30 +1341,26 @@ Theorem fundamental : forall e t Γ Σ,
                             Γ |= Σ ->
                             SN t (close Σ e).
 Proof.
+  Hint Resolve TConst_compat.
+  Hint Resolve TVar_compat.
+  Hint Resolve TAbs_compat.
+  Hint Resolve TApp_compat.
+  Hint Resolve TIf_compat.
+  Hint Resolve TPair_compat.
   intros.
   generalize dependent Σ.
-  induction H; intros.
-
-  eapply TConst_compat; iauto.
-
-  eapply TVar_compat; iauto.
-
+  induction H; intros; iauto';
+  (* doesn't seem able to get this automatically *)
   eapply TAbs_compat; iauto; intros;
   eapply IHhas_type;
   econstructor; iauto.
-
-  eapply TApp_compat; iauto.
-
-  eapply TIf_compat; iauto.
-
-  eapply TPair_compat; iauto.
 Qed.
 
 Theorem strong_normalization : forall e t,
                                  nil |-- e t ->
                                  halts e.
 Proof.
+  Hint Resolve fundamental sn_halts.
   intros.
-  assert (SN t (close nil e)). eapply fundamental; iauto.
-  eapply sn_halts; iauto.
+  assert (SN t (close nil e)); iauto.
 Qed.
