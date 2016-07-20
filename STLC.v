@@ -2,11 +2,8 @@ Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Progra
 
 (** NOTE(dbp 2016-07-19):
 
-Some obvious improvements that could be made to this presentation:
+An obvious improvement that could be made:
 
-1. Localize Hints inside lemmas, so it is clearer what the dependency
-   is between them. This might not have to be done for _all_ lemmas,
-   but should probably be the default.
 2. Use Hint Extern rather than ad-hoc tactics like pair_destruct and
    string_destruct.
 
@@ -249,9 +246,6 @@ Proof.
   induction H; iauto.
 Qed.
 
-Hint Resolve multi_trans.
-
-
 (**************************************)
 (******* 5. LOGICAL RELATION **********)
 (**************************************)
@@ -349,8 +343,6 @@ Proof.
     crush.
 Qed.
 
-Hint Rewrite plug_same.
-
 Lemma plug_exists : forall C e e' e1,
                       plug C e e' ->
                       multi step e e1 ->
@@ -371,8 +363,6 @@ Proof.
   solve [exists (Pair x e); iauto].
   solve [exists (Pair e x); iauto].
 Qed.
-
-Hint Resolve plug_exists.
 
 Lemma plug_compose : forall C C' e e' e'',
                        plug C e e' ->
@@ -396,8 +386,6 @@ Proof.
   ]; intros; plug_invert; iauto.
 Qed.
 
-Hint Resolve plug_compose.
-
 Lemma step_context : forall C e1 e2,
                         step e1 e2 ->
                         forall e1' e2',
@@ -411,8 +399,6 @@ Proof.
   iauto'.
 Qed.
 
-Hint Resolve step_context.
-
 Lemma multi_context : forall C e1 e2,
                         multi step e1 e2 ->
                         forall e1' e2',
@@ -420,6 +406,7 @@ Lemma multi_context : forall C e1 e2,
                         plug C e2 e2' ->
                         multi step e1' e2'.
 Proof.
+  Hint Resolve plug_exists step_context.
   intros C e1 e2 H.
   induction H; intros.
   rewrite (plug_same H H0); iauto.
@@ -436,8 +423,6 @@ Proof.
   induction Σ; iauto.
 Qed.
 
-Hint Rewrite close_const.
-
 Lemma halts_value : forall v, value v -> halts v.
 Proof.
   intros. exists v. iauto.
@@ -447,8 +432,6 @@ Lemma sn_halts : forall t e, SN t e -> halts e.
 Proof.
   intros. destruct t; crush.
 Qed.
-
-Hint Resolve halts_value sn_halts.
 
 Lemma string_dec_refl : forall T s (t:T) (f:T), (if string_dec s s then t else f) = t.
 Proof.
@@ -461,8 +444,6 @@ Proof.
   intros.
   destruct (string_dec s s'). subst. contradiction H. eauto. reflexivity.
 Qed.
-
-Hint Rewrite string_dec_ne string_dec_refl.
 
 Ltac string_destruct :=
   repeat (match goal with
@@ -500,27 +481,23 @@ Proof.
          end; iauto.
 Qed.
 
-Hint Rewrite sub_closed lookup_fulfill_v.
-
 Lemma close_closed : forall Σ e, closed e -> close Σ e = e.
 Proof.
+  Hint Rewrite sub_closed.
   intro Σ.
   induction Σ; crush.
   unfold closed in *; iauto.
 Qed.
 
-Hint Resolve close_closed.
-
 Lemma close_var : forall Σ x e, closed_env Σ ->
                            lookup Σ x = Some e ->
                            close Σ (Var x) = e.
 Proof.
+  Hint Resolve close_closed.
   intros.
   induction Σ; crush; pair_destruct;
   string_destruct; crush.
 Qed.
-
-Hint Resolve close_var.
 
 Lemma lookup_fulfill_sn : forall Γ Σ,
                             Γ |= Σ ->
@@ -534,18 +511,15 @@ Proof.
   simpl in *; string_destruct; iauto; crush.
 Qed.
 
-Hint Resolve lookup_fulfill_sn.
-
 Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
                       x <> y ->
                       lookup (drop x Γ) y = lookup Γ y.
 Proof.
+  Hint Rewrite string_dec_ne string_dec_refl.
   intros.
   induction Γ; simpl in *; pair_destruct;
   string_destruct; crush.
 Qed.
-
-Hint Resolve lookup_drop.
 
 Lemma free_in_context : forall x e t Γ,
                           free_in x e ->
@@ -558,15 +532,11 @@ Proof.
   rewrite lookup_drop in *; iauto.
 Qed.
 
-Hint Resolve free_in_context.
-
 Lemma typable_empty_closed : forall e t, nil |-- e t -> closed e.
 Proof.
   unfold closed. unfold not. intros.
   destruct (free_in_context H0 H). crush.
 Qed.
-
-Hint Resolve typable_empty_closed.
 
 Lemma sn_typable_empty : forall e t, SN t e -> nil |-- e t.
 Proof.
@@ -574,14 +544,11 @@ Proof.
   destruct t; crush.
 Qed.
 
-Hint Resolve sn_typable_empty.
-
 Lemma sn_closed : forall t e, SN t e -> closed e.
 Proof.
+  Hint Resolve typable_empty_closed sn_typable_empty.
   intros. iauto.
 Qed.
-
-Hint Resolve sn_typable_empty.
 
 Lemma fulfill_closed : forall Γ Σ, Γ |= Σ -> closed_env Σ.
 Proof.
@@ -590,8 +557,6 @@ Proof.
 Qed.
 
 
-Hint Resolve fulfill_closed.
-
 
 Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
                              Abs x t (close (drop x Σ) e).
@@ -599,8 +564,6 @@ Proof.
   induction Σ; intros; simpl;
   pair_destruct; string_destruct; crush.
 Qed.
-
-Hint Rewrite close_abs.
 
 Lemma context_invariance : forall Γ Γ' e t,
      Γ |-- e t  ->
@@ -624,8 +587,6 @@ Proof.
   intros; destruct (free_in_context H0 H); crush.
 Qed.
 
-Hint Resolve free_closed.
-
 Ltac has_type_invert :=
   match goal with
     |[HT : (_ |-- _) _ |- _] => inversion HT; clear HT
@@ -636,6 +597,7 @@ Lemma substitution_preserves_typing : forall Γ x t v e t',
      nil |-- v t'   ->
      Γ |-- ([x:=v]e) t.
 Proof.
+  Hint Resolve free_closed.
   intros.
   generalize dependent Γ.
   generalize dependent t.
@@ -660,15 +622,11 @@ Proof.
   intros. simpl. string_destruct; crush.
 Qed.
 
-Hint Resolve substitution_preserves_typing.
-
 Lemma sn_types : forall t e, SN t e -> nil |-- e t.
 Proof.
   intros.
   destruct t; iauto.
 Qed.
-
-Hint Resolve sn_types.
 
 
 Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
@@ -676,11 +634,10 @@ Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
                           (mextend G Γ) |-- e t ->
                           G |-- (close Σ e) t.
 Proof.
+  Hint Resolve substitution_preserves_typing.
   induction 1; intros;
   simpl in *; iauto'.
 Qed.
-
-Hint Resolve close_preserves.
 
 Lemma fulfills_drop : forall Γ Σ,
     Γ |= Σ ->
@@ -689,8 +646,6 @@ Proof.
   intros c e V. induction V; intros;
                 simpl; string_destruct; crush.
 Qed.
-
-Hint Resolve fulfills_drop.
 
 Lemma extend_drop : forall {T:Set}
                       (Γ : list (string * T))
@@ -708,6 +663,7 @@ Lemma extend_drop'' : forall Γ x t t' e,
                         (extend (drop x Γ) x t) |-- e t' ->
                         (extend Γ x t) |-- e t'.
 Proof.
+  Hint Resolve lookup_drop.
   intros.
   eapply context_invariance; iauto;
   intros;
@@ -723,9 +679,6 @@ Proof.
   intros. rewrite H in H0. crush.
 Qed.
 
-Hint Resolve lookup_same.
-
-
 Lemma typed_hole : forall C e e' t,
                      nil |-- e t ->
                      plug C e' e ->
@@ -737,8 +690,6 @@ Proof.
   plug_invert; has_type_invert;
   iauto.
 Qed.
-
-Hint Resolve typed_hole.
 
 Ltac step_invert :=
   match goal with
@@ -758,10 +709,6 @@ Proof.
   induction H; inversion H0; iauto.
 Qed.
 
-Hint Resolve plug_values.
-
-
-
 Lemma multi_subst : forall x v1 v2 e,
                       closed v1 -> closed v2 ->
                       [x:=v1]([x:=v2]e) = [x:=v2]e.
@@ -775,8 +722,6 @@ Proof.
   end;
   string_destruct; iauto; crush.
 Qed.
-
-Hint Rewrite multi_subst.
 
 Ltac closed_tac :=
   match goal with
@@ -801,8 +746,6 @@ Proof.
   string_destruct; iauto;
   crush.
 Qed.
-
-Hint Rewrite swap_sub.
 
 Lemma sub_close: forall Σ x v e,
                       closed v ->
@@ -868,8 +811,6 @@ Proof.
   |rewrite swap_sub; crush].
 Qed.
 
-Hint Rewrite extend_drop'.
-
 Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t,
                         x <> x0 ->
                         lookup ((x, t) :: Γ) x0 =
@@ -882,8 +823,6 @@ Proof.
   repeat (simpl; string_destruct; pair_destruct; iauto).
 Qed.
 
-Hint Rewrite lookup_mextend.
-
 
 Lemma close_app : forall Σ e1 e2,
                     close Σ (App e1 e2) =
@@ -893,9 +832,6 @@ Proof.
   induction Σ; simpl; intuition.
 Qed.
 
-Hint Rewrite close_app.
-
-
 Lemma close_if : forall Σ e1 e2 e3,
                     close Σ (If e1 e2 e3) =
                     If (close Σ e1) (close Σ e2) (close Σ e3).
@@ -904,18 +840,14 @@ Proof.
   induction Σ; simpl; intuition.
 Qed.
 
-Hint Rewrite close_if.
-
 Lemma drop_fulfills : forall Γ Σ x,
                         Γ |= Σ ->
                         drop x Γ |= drop x Σ.
 Proof.
+  Hint Resolve fulfills_drop.
   intros.
   induction H; iauto.
 Qed.
-
-Hint Resolve drop_fulfills.
-
 
 Lemma close_pair : forall Σ e1 e2,
                     close Σ (Pair e1 e2) =
@@ -924,8 +856,6 @@ Proof.
   intro Σ.
   induction Σ; simpl; intuition.
 Qed.
-
-Hint Rewrite close_pair.
 
 (**************************************)
 (**** 7. ANTI-REDUCTION/DETERMINISM ***)
@@ -979,14 +909,13 @@ Proof.
   subst; iauto.
 Qed.
 
-Hint Resolve preservation_prim_step.
-
 
 Lemma unique_typing : forall e Γ t t',
                         Γ |-- e t ->
                         Γ |-- e t' ->
                         t = t'.
 Proof.
+  Hint Resolve lookup_same.
   intro e.
   induction e; intros; iauto;
   inversion H; inversion H0; iauto;
@@ -996,8 +925,6 @@ Proof.
   assert (EQ : (Fun t1 t) = (Fun t0 t')). iauto.
   inversion EQ; iauto.
 Qed.
-
-Hint Resolve unique_typing.
 
 Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e1' t ->
@@ -1020,12 +947,12 @@ Proof.
   subst; iauto.
 Qed.
 
-Hint Resolve preservation_plug.
-
 Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
                                      step e1 e2 ->
                                      nil |-- e2 t.
 Proof.
+  Hint Resolve preservation_plug.
+  Hint Resolve preservation_prim_step.
   intros.
   inversion H0; subst.
   match goal with
@@ -1035,17 +962,14 @@ Proof.
   iauto.
 Qed.
 
-Hint Resolve preservation_step.
-
 Lemma preservation : forall e1 e2 t, multi step e1 e2 ->
                                 nil |-- e1 t ->
                                 nil |-- e2 t.
 Proof.
+  Hint Resolve preservation_step.
   intros.
   induction H; iauto.
 Qed.
-
-Hint Resolve preservation.
 
 
 Lemma anti_reduct : forall e' e t, multi step e e' ->
@@ -1053,6 +977,7 @@ Lemma anti_reduct : forall e' e t, multi step e e' ->
                               nil |-- e t ->
                               SN t e.
 Proof.
+  Hint Resolve multi_trans.
   intros.
   generalize dependent e.
   generalize dependent e'.
@@ -1069,10 +994,9 @@ Proof.
   iauto.
 Qed.
 
-Hint Resolve anti_reduct.
-
 Lemma values_dont_step : forall v e, value v -> ~step v e.
 Proof.
+  Hint Resolve plug_values.
   unfold not. intros. step_invert; value_invert;
   match goal with
     |[H: plug _ _ (Const _) |- _] => invert H
@@ -1084,8 +1008,6 @@ Proof.
   step_prim_invert.
 Qed.
 
-Hint Resolve values_dont_step.
-
 Lemma step_prim_deterministic : forall e1 e2 e2',
                                   step_prim e1 e2 ->
                                   step_prim e1 e2' ->
@@ -1093,8 +1015,6 @@ Lemma step_prim_deterministic : forall e1 e2 e2',
 Proof.
   intros. repeat step_prim_invert; iauto.
 Qed.
-
-Hint Resolve step_prim_deterministic.
 
 Ltac smash :=
   repeat try match goal with
@@ -1167,8 +1087,6 @@ Proof.
   end.
 Qed.
 
-Hint Resolve plug_step_uniq.
-
 Lemma step_deterministic : forall e1 e2 e2',
                              step e1 e2 ->
                              step e1 e2' ->
@@ -1183,12 +1101,11 @@ Proof.
   destruct (plug_same H4 H0); eauto.
 Qed.
 
-Hint Resolve step_deterministic.
-
 Lemma step_preserves_halting : forall e e',
                                  step e e' ->
                                  (halts e <-> halts e').
 Proof.
+  Hint Resolve step_deterministic.
   intros. unfold halts.
   split; intros; crush;
   try solve[exists x; iauto].
@@ -1206,8 +1123,6 @@ Proof.
   end.
 Qed.
 
-Hint Resolve step_preserves_halting.
-
 Lemma step_preserves_sn : forall t e e',
                             step e e' ->
                             SN t e ->
@@ -1223,13 +1138,12 @@ Proof.
   end; iauto'.
 Qed.
 
-Hint Resolve step_preserves_sn.
-
 Lemma multistep_preserves_sn : forall t e e',
                                  multi step e e' ->
                                  SN t e ->
                                  SN t e'.
 Proof.
+  Hint Resolve step_preserves_sn.
   intros.
   induction H; iauto.
 Qed.
@@ -1259,6 +1173,8 @@ Lemma TConst_compat : forall Γ Σ b,
                         Γ |= Σ ->
                         SN Bool (close Σ (Const b)).
 Proof.
+  Hint Rewrite close_const.
+  Hint Resolve halts_value.
   crush.
 Qed.
 
@@ -1267,6 +1183,7 @@ Lemma TVar_compat : forall Γ Σ x t,
                       lookup Γ x = Some t ->
                       SN t (close Σ (Var x)).
 Proof.
+  Hint Resolve lookup_fulfill_sn fulfill_closed.
   intros.
   destruct (lookup_fulfill_v H x H0); iauto.
   rewrite close_var with (e := x0); iauto.
@@ -1287,8 +1204,6 @@ Proof.
   simpl. string_destruct; iauto. iauto.
 Qed.
 
-Hint Resolve TAbs_typing.
-
 Lemma TAbs_app : forall x t Σ e xh,
                    value xh ->
                    closed xh ->
@@ -1301,14 +1216,14 @@ Proof.
   rewrite sub_close_extend; crush.
 Qed.
 
-Hint Resolve TAbs_app.
-
 Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
                       (extend (drop x Γ) x t) |-- e t' ->
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
+  Hint Resolve TAbs_app TAbs_typing sn_halts.
+  Hint Rewrite close_abs.
   intros.
   crush; iauto.
 
@@ -1329,6 +1244,7 @@ Lemma TApp_compat : forall Γ Σ e1 e2 t t',
                       SN t (close Σ e2) ->
                       SN t' (close Σ (App e1 e2)).
 Proof.
+  Hint Rewrite close_app.
   intros; crush.
 Qed.
 
@@ -1345,6 +1261,8 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
+  Hint Resolve preservation.
+  Hint Rewrite close_if.
   intros; crush;
   match goal with
     |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
@@ -1379,6 +1297,7 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                       SN (Product t1 t2)
                          (close Σ (Pair e1 e2)).
 Proof.
+  Hint Rewrite close_pair.
   intros. crush;
   repeat match goal with
            |[H: SN _ _ |- _] =>
