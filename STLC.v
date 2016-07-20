@@ -1,14 +1,5 @@
 Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Program.Equality.
 
-(** NOTE(dbp 2016-07-19):
-
-An obvious improvement that could be made:
-
-2. Use Hint Extern rather than ad-hoc tactics like pair_destruct and
-   string_destruct.
-
-*)
-
 Load CpdtTactics.
 
 Set Implicit Arguments.
