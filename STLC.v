@@ -275,7 +275,9 @@ Inductive fulfills : tyenv -> venv -> Prop :=
 where "Γ '|=' Σ" := (fulfills Γ Σ).
 
 Hint Constructors fulfills.
-
+Hint Extern 5 (_ |= _) => eapply FCons.
+(* NOTE(dbp 2017-03-25): If there is an extend (for example) that needs to be
+unfolded, the constructor won't match directly, so we try to use it anyway. *)
 
 (**************************************)
 (******** 6. MISC. PROPERTIES *********)
@@ -486,7 +488,7 @@ Lemma close_var : forall Σ x e, closed_env Σ ->
                            lookup Σ x = Some e ->
                            close Σ (Var x) = e.
 Proof.
-  Hint Resolve close_closed.
+  hint close_closed.
   intros.
   induction Σ; crush; repeat destruct_tac; crush.
 Qed.
@@ -537,12 +539,16 @@ Qed.
 
 Lemma sn_closed : forall t e, SN t e -> closed e.
 Proof.
-  Hint Resolve typable_empty_closed sn_typable_empty.
+  hint typable_empty_closed.
+  hint sn_typable_empty.
   intros. iauto.
 Qed.
 
 Lemma fulfill_closed : forall Γ Σ, Γ |= Σ -> closed_env Σ.
 Proof.
+  hint typable_empty_closed.
+  hint sn_typable_empty.
+  
   intros.
   induction H; simpl; iauto.
 Qed.
@@ -588,7 +594,7 @@ Lemma substitution_preserves_typing : forall Γ x t v e t',
      nil |-- v t'   ->
      Γ |-- ([x:=v]e) t.
 Proof.
-  Hint Resolve free_closed.
+  hint free_closed.
   intros.
   generalize dependent Γ.
   generalize dependent t.
@@ -615,6 +621,8 @@ Qed.
 
 Lemma sn_types : forall t e, SN t e -> nil |-- e t.
 Proof.
+  hint sn_typable_empty.
+
   intros.
   destruct t; iauto.
 Qed.
@@ -625,7 +633,8 @@ Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
                           (mextend G Γ) |-- e t ->
                           G |-- (close Σ e) t.
 Proof.
-  Hint Resolve substitution_preserves_typing.
+  hint sn_typable_empty.
+  hint substitution_preserves_typing.
   induction 1; intros;
   simpl in *; iauto'.
 Qed.
@@ -656,7 +665,7 @@ Lemma extend_drop'' : forall Γ x t t' e,
                         (extend (drop x Γ) x t) |-- e t' ->
                         (extend Γ x t) |-- e t'.
 Proof.
-  Hint Resolve lookup_drop.
+  hint lookup_drop.
   intros.
   eapply context_invariance; iauto;
   intros;
@@ -837,7 +846,7 @@ Lemma drop_fulfills : forall Γ Σ x,
                         Γ |= Σ ->
                         drop x Γ |= drop x Σ.
 Proof.
-  Hint Resolve fulfills_drop.
+  hint fulfills_drop.
   intros.
   induction H; iauto.
 Qed.
@@ -908,7 +917,7 @@ Lemma unique_typing : forall e Γ t t',
                         Γ |-- e t' ->
                         t = t'.
 Proof.
-  Hint Resolve lookup_same.
+  hint lookup_same.
   intro e.
   induction e; intros; iauto;
   inversion H; inversion H0; iauto;
@@ -944,8 +953,8 @@ Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
                                      step e1 e2 ->
                                      nil |-- e2 t.
 Proof.
-  Hint Resolve preservation_plug.
-  Hint Resolve preservation_prim_step.
+  hint preservation_plug.
+  hint preservation_prim_step.
   intros.
   inversion H0; subst.
   match goal with
@@ -959,7 +968,7 @@ Lemma preservation : forall e1 e2 t, multi step e1 e2 ->
                                 nil |-- e1 t ->
                                 nil |-- e2 t.
 Proof.
-  Hint Resolve preservation_step.
+  hint preservation_step.
   intros.
   induction H; iauto.
 Qed.
@@ -970,7 +979,9 @@ Lemma anti_reduct : forall e' e t, multi step e e' ->
                               nil |-- e t ->
                               SN t e.
 Proof.
-  Hint Resolve multi_trans.
+  hint sn_typable_empty.
+
+  hint @multi_trans.
   intros.
   generalize dependent e.
   generalize dependent e'.
@@ -989,7 +1000,7 @@ Qed.
 
 Lemma values_dont_step : forall v e, value v -> ~step v e.
 Proof.
-  Hint Resolve plug_values.
+  hint plug_values.
   unfold not. intros. step_invert; value_invert;
   match goal with
     |[H: plug _ _ (Const _) |- _] => invert H
@@ -1098,7 +1109,7 @@ Lemma step_preserves_halting : forall e e',
                                  step e e' ->
                                  (halts e <-> halts e').
 Proof.
-  Hint Resolve step_deterministic.
+  hint step_deterministic.
   intros. unfold halts.
   split; intros; crush;
   try solve[exists x; iauto].
@@ -1122,6 +1133,7 @@ Lemma step_preserves_sn : forall t e e',
                             SN t e'.
 Proof.
   hint step_context.
+  hint preservation_step.
 
   induction t; intros e e' H H0; crush; iauto;
   try match goal with
@@ -1138,7 +1150,7 @@ Lemma multistep_preserves_sn : forall t e e',
                                  SN t e ->
                                  SN t e'.
 Proof.
-  Hint Resolve step_preserves_sn.
+  hint step_preserves_sn.
   intros.
   induction H; iauto.
 Qed.
@@ -1168,8 +1180,8 @@ Lemma TConst_compat : forall Γ Σ b,
                         Γ |= Σ ->
                         SN Bool (close Σ (Const b)).
 Proof.
-  Hint Rewrite close_const.
-  Hint Resolve halts_value.
+  hint close_const.
+  hint halts_value.
   crush.
 Qed.
 
@@ -1190,6 +1202,7 @@ Lemma TAbs_typing : forall Γ Σ x e t t',
                       (extend (drop x Γ) x t) |-- e t' ->
                       nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
 Proof.
+  hint lookup_drop.
   intros.
   econstructor. eapply close_preserves.
   eapply fulfills_drop. iauto.
@@ -1219,24 +1232,26 @@ Lemma TAbs_compat : forall Γ Σ x e t t',
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
+  Hint Rewrite close_abs.
+  hint TAbs_typing.
   hint lookup_fulfill_sn.
   hint fulfill_closed.
   hint TAbs_app.
-  hint TAbs_typing.
-
-  Hint Rewrite close_abs.
+  hint halts_value.
+  hint sn_typable_empty.
+  hint @multi_trans.
   intros.
-
   crush; iauto.
 
   assert (HH: halts s) by (hint sn_halts; iauto).
   inversion HH as [xh MS]. crush.
   assert (SN t xh) by (eapply multistep_preserves_sn; iauto).
   assert (closed xh) by (eapply sn_closed; iauto).
-  
+
+
   eapply anti_reduct with (e' := close (extend (drop x Σ) x xh) e); try solve [crush]; try solve [iauto'].
-  eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) xh)); iauto;
-  eapply multi_context with (e1 := s) (e2 := xh); iauto.
+  eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) xh)); iauto';
+  eapply multi_context with (e1 := s) (e2 := xh); iauto'.
 Qed.
 
 Lemma TApp_compat : forall Γ Σ e1 e2 t t',
@@ -1262,6 +1277,7 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
+  hint sn_typable_empty.
   hint preservation.
   Hint Rewrite close_if.
   intros; crush;
@@ -1298,6 +1314,8 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                       SN (Product t1 t2)
                          (close Σ (Pair e1 e2)).
 Proof.
+  hint sn_typable_empty.
+
   Hint Rewrite close_pair.
   intros. crush;
   repeat match goal with
@@ -1348,13 +1366,10 @@ Proof.
   hint TApp_compat.
   hint TIf_compat.
   hint TPair_compat.
+  hint fulfills_drop.
   intros.
   generalize dependent Σ.
-  induction H; intros; iauto';
-  (* doesn't seem able to get this automatically *)
-  eapply TAbs_compat; iauto; intros;
-  eapply IHhas_type;
-  econstructor; iauto.
+  induction H; intros; iauto'.
 Qed.
 
 Theorem strong_normalization : forall e t,
