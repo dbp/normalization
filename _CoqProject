@@ -1,0 +1,2 @@
+-R ../autosubst/theories Autosubst
+-R ../cpdtlib Cpdt

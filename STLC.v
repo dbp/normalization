@@ -8,6 +8,12 @@ Ltac iauto := try solve [intuition (eauto 3)].
 Ltac iauto' := try solve [intuition eauto].
 Ltac invert H := inversion H; clear H; try subst.
 
+Tactic Notation "hint" constr(E) :=
+  let H := fresh "Hint" in
+  let t := type of E in
+  assert (H : t) by (exact E).
+
+
 (**************************************)
 (************ 1. SYNTAX ***************)
 (**************************************)
@@ -397,7 +403,8 @@ Lemma multi_context : forall C e1 e2,
                         plug C e2 e2' ->
                         multi step e1' e2'.
 Proof.
-  Hint Resolve plug_exists step_context.
+  hint plug_exists.
+  hint step_context.
   intros C e1 e2 H.
   induction H; intros.
   rewrite (plug_same H H0); iauto.
@@ -1114,6 +1121,8 @@ Lemma step_preserves_sn : forall t e e',
                             SN t e ->
                             SN t e'.
 Proof.
+  hint step_context.
+
   induction t; intros e e' H H0; crush; iauto;
   try match goal with
         |[_: halts ?e, _: step ?e ?e' |- halts ?e'] =>
@@ -1169,7 +1178,8 @@ Lemma TVar_compat : forall Γ Σ x t,
                       lookup Γ x = Some t ->
                       SN t (close Σ (Var x)).
 Proof.
-  Hint Resolve lookup_fulfill_sn fulfill_closed.
+  hint lookup_fulfill_sn.
+  hint fulfill_closed.
   intros.
   destruct (lookup_fulfill_v H x H0); iauto.
   rewrite close_var with (e := x0); iauto.
@@ -1209,17 +1219,21 @@ Lemma TAbs_compat : forall Γ Σ x e t t',
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
-  Hint Resolve TAbs_app TAbs_typing sn_halts.
+  hint lookup_fulfill_sn.
+  hint fulfill_closed.
+  hint TAbs_app.
+  hint TAbs_typing.
+
   Hint Rewrite close_abs.
   intros.
+
   crush; iauto.
 
-  assert (HH: halts s) by iauto.
+  assert (HH: halts s) by (hint sn_halts; iauto).
   inversion HH as [xh MS]. crush.
-  assert (SN t xh) by (eapply multistep_preserves_sn;
-                       iauto).
+  assert (SN t xh) by (eapply multistep_preserves_sn; iauto).
   assert (closed xh) by (eapply sn_closed; iauto).
-
+  
   eapply anti_reduct with (e' := close (extend (drop x Σ) x xh) e); try solve [crush]; try solve [iauto'].
   eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) xh)); iauto;
   eapply multi_context with (e1 := s) (e2 := xh); iauto.
@@ -1248,7 +1262,7 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
-  Hint Resolve preservation.
+  hint preservation.
   Hint Rewrite close_if.
   intros; crush;
   match goal with
@@ -1328,12 +1342,12 @@ Theorem fundamental : forall e t Γ Σ,
                             Γ |= Σ ->
                             SN t (close Σ e).
 Proof.
-  Hint Resolve TConst_compat.
-  Hint Resolve TVar_compat.
-  Hint Resolve TAbs_compat.
-  Hint Resolve TApp_compat.
-  Hint Resolve TIf_compat.
-  Hint Resolve TPair_compat.
+  hint TConst_compat.
+  hint TVar_compat.
+  hint TAbs_compat.
+  hint TApp_compat.
+  hint TIf_compat.
+  hint TPair_compat.
   intros.
   generalize dependent Σ.
   induction H; intros; iauto';
@@ -1347,7 +1361,8 @@ Theorem strong_normalization : forall e t,
                                  nil |-- e t ->
                                  halts e.
 Proof.
-  Hint Resolve fundamental sn_halts.
+  hint fundamental.
+  hint sn_halts.
   intros.
   assert (SN t (close nil e)); iauto.
 Qed.
