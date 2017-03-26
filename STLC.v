@@ -28,6 +28,8 @@ Hint Extern 5 => match goal with
                  progress (rewrite H in *)
                 |[H : forall _ _ _ _, _ -> _ = _ |- _] =>
                  progress (rewrite H in *)
+                |[H : forall _ _ _, _ -> _ = _ |- _] =>
+                 progress (rewrite H in *) 
                 end.
 
 
@@ -1257,7 +1259,7 @@ Lemma TAbs_compat : forall Γ Σ x e t t',
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
-  Hint Rewrite close_abs.
+  hint_rewrite close_abs.
   hint TAbs_typing.
   hint lookup_fulfill_sn.
   hint fulfill_closed.
@@ -1285,7 +1287,7 @@ Lemma TApp_compat : forall Γ Σ e1 e2 t t',
                       SN t (close Σ e2) ->
                       SN t' (close Σ (App e1 e2)).
 Proof.
-  Hint Rewrite close_app.
+  hint_rewrite close_app.
   intros; crush.
 Qed.
 
@@ -1304,7 +1306,7 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
 Proof.
   hint sn_typable_empty.
   hint preservation.
-  Hint Rewrite close_if.
+  hint_rewrite close_if.
   intros; crush;
   match goal with
     |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
