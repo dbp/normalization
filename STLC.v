@@ -8,6 +8,20 @@ Ltac iauto := try solve [intuition (eauto 3)].
 Ltac iauto' := try solve [intuition eauto].
 Ltac invert H := inversion H; clear H; try subst.
 
+
+(* NOTE(dbp 2017-03-26): Often when inverting, we only want to handle
+   cases that are _not_ variables. This will fail if C is a variable
+   of type T *)
+Ltac is_var C T :=
+  match goal with
+  |[ C' : T |- _ ] =>
+   match C with
+   | C' => fail 2
+   | _ => fail 1
+   end
+  | _ => idtac
+  end.
+
 Tactic Notation "hint" constr(E) :=
   let H := fresh "Hint" in
   let t := type of E in
@@ -16,41 +30,32 @@ Tactic Notation "hint" constr(E) :=
 Inductive RR (A : Prop) : Prop :=
 | rewrite_rule : forall a : A, RR A.
 
+Definition unRR (A : Prop) (r : RR A) :=
+  match r with
+  | rewrite_rule rr => rr
+  end.
 
 Tactic Notation "hint_rewrite" constr(E) := 
   let H := fresh "Hint" in
   let t := type of E in
   assert (H : RR t) by (exact (rewrite_rule E)).
 
-
-Definition unRR (A : Prop) (r : RR A) :=
-  match r with
-  | rewrite_rule rr => rr
-  end.
-
-(* NOTE(dbp 2017-03-25): We want _local_ rewrites, so we use the same strategy
-   as local apply - get them into our hypothesis with `hint`, and then rewrite
-   based on that. To do that, we have a general rule that tries to rewrite based
-   on hypothesis that end in an equality. We do these as separate Hints so that
-   we backtrack and try subsequent ones if one ends up in a dead-end. *)
-
-
 Hint Extern 5 => match goal with
                 |[H : RR (_ = _) |- _] =>
                  progress (rewrite (unRR H) in *)
-                           end.
+                end.
 Hint Extern 5 => match goal with
                 |[H : RR (forall _, _ = _) |- _] =>
                  progress (rewrite (unRR H) in *)
-                           end.
+                end.
 Hint Extern 5 => match goal with
                 |[H : RR (forall _ _, _ = _) |- _] =>
                  progress (rewrite (unRR H) in *)
-                           end.
+                end.
 Hint Extern 5 => match goal with
                 |[H : RR (forall _ _ _, _ = _) |- _] =>
                  progress (rewrite (unRR H) in *)
-                           end.
+                end.
 Hint Extern 5 => match goal with
                 |[H : RR (forall _ _ _ _, _ = _) |- _] =>
                  progress (rewrite (unRR H) in *) 
@@ -353,16 +358,23 @@ unfolded, the constructor won't match directly, so we try to use it anyway. *)
     that are motivate all the other intermediate results.
  *)
 
-Ltac plug_invert :=
-  try repeat
-      match goal with
-        |[H : plug CHole _ _ |- _ ] => invert H
-        |[H : plug (CApp1 _ _) _ _ |- _ ] => invert H
-        |[H : plug (CApp2 _ _) _ _ |- _ ] => invert H
-        |[H : plug (CIf _ _ _) _ _ |- _ ] => invert H
-        |[H : plug (CPair1 _ _) _ _ |- _ ] => invert H
-        |[H : plug (CPair2 _ _) _ _ |- _ ] => invert H
-      end.
+
+Ltac plug := let c := constr:(context) in
+             match goal with
+             |[H : plug ?C1 _ _ |- _ ] =>
+              is_var C1 c; invert H
+             end.
+
+Hint Extern 5 => plug.
+
+Hint Extern 5 => match goal with
+                |[IH : forall x, _ -> ?P x = ?Q x,
+                    H: ?P ?x = ?y
+                    |- ?Q ?x = ?y] => rewrite <- (IH x)
+                |[IH : forall x, _ -> ?Q x = ?P x,
+                    H: ?P ?x = ?y
+                    |- ?Q ?x = ?y] => rewrite (IH x)
+                end.
 
 Ltac use_ih_tac :=
   match goal with
@@ -389,11 +401,13 @@ Lemma plug_same : forall C x e1 e2,
 Proof.
   intro C.
   induction C;
-    intros;
-    plug_invert;
-    crush;
-    use_ih_tac;
-    crush.
+    intros; repeat plug;
+    match goal with
+    |[ IH : forall _ _ _, plug _ _ _ -> plug _ _ _ -> _ = _,
+         H1 : plug _ ?x ?e1, H2 : plug _ ?x ?e2 |- _] =>
+     rewrite (IH x e1 e2); solve [auto]
+    | _ => solve [auto]
+    end.
 Qed.
 
 Lemma plug_exists : forall C e e' e1,
@@ -401,20 +415,13 @@ Lemma plug_exists : forall C e e' e1,
                       multi step e e1 ->
                       exists e1', plug C e1 e1'.
 Proof.
-  intro C.
-  induction C; intros;
-  plug_invert;
+  intro C;
+    induction C; intros; repeat plug;
   try match goal with
-        |[H : plug C _ _ |- _ ] =>
-         eapply IHC in H; iauto; inversion H
-      end.
-
-  solve [exists e1; iauto].
-  solve [exists (App x e); iauto].
-  solve [exists (App e x); iauto].
-  solve [exists (If x e e0); iauto].
-  solve [exists (Pair x e); iauto].
-  solve [exists (Pair e x); iauto].
+        |[IH : forall _, _, H : plug C _ _ |- _ ] =>
+         eapply IH in H; iauto; inversion H
+      end;
+  eexists; iauto.
 Qed.
 
 Lemma plug_compose : forall C C' e e' e'',
@@ -430,13 +437,7 @@ Proof.
     |[IH : context[_:?P -> _],
           H : ?P |- _] => apply IH in H; inversion H
       end;
-  [  exists C
-   | exists (CApp1 x e2)
-   | exists (CApp2 v x)
-   | exists (CIf x e2 e3)
-   | exists (CPair1 x e2)
-   | exists (CPair2 v x)
-  ]; intros; plug_invert; iauto.
+  eexists; intros; repeat plug; iauto.
 Qed.
 
 Lemma step_context : forall C e1 e2,
@@ -763,7 +764,7 @@ Proof.
   intros.
   generalize dependent t.
   induction H0; intros;
-  plug_invert; has_type_invert;
+  repeat plug; has_type_invert;
   iauto.
 Qed.
 
@@ -1011,7 +1012,7 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e2' t.
 Proof.
   intro C.
-  induction C; intros; plug_invert;
+  induction C; intros; repeat plug;
   iauto; try solve
              [inversion H; subst;
               econstructor;
