@@ -13,25 +13,60 @@ Tactic Notation "hint" constr(E) :=
   let t := type of E in
   assert (H : t) by (exact E).
 
-Tactic Notation "hint_rewrite" constr(E) := hint E.
+Inductive RR (A : Prop) : Prop :=
+| rewrite_rule : forall a : A, RR A.
+
+
+Tactic Notation "hint_rewrite" constr(E) := 
+  let H := fresh "Hint" in
+  let t := type of E in
+  assert (H : RR t) by (exact (rewrite_rule E)).
+
+
+Definition unRR (A : Prop) (r : RR A) :=
+  match r with
+  | rewrite_rule rr => rr
+  end.
 
 (* NOTE(dbp 2017-03-25): We want _local_ rewrites, so we use the same strategy
    as local apply - get them into our hypothesis with `hint`, and then rewrite
    based on that. To do that, we have a general rule that tries to rewrite based
-   on hypothesis that end in an equality. *)
-Hint Extern 5 => match goal with
-                |[H : forall _ _ _ _, _ -> _ -> _ = _ |- _] =>
-                 progress (rewrite H in *)
-                |[H : forall _ _, _ -> forall _, _ = _ |- _] =>
-                 progress (rewrite H in *)
-                |[H : forall _ _ _ _ _, _ -> _ = _ |- _] =>
-                 progress (rewrite H in *)
-                |[H : forall _ _ _ _, _ -> _ = _ |- _] =>
-                 progress (rewrite H in *)
-                |[H : forall _ _ _, _ -> _ = _ |- _] =>
-                 progress (rewrite H in *) 
-                end.
+   on hypothesis that end in an equality. We do these as separate Hints so that
+   we backtrack and try subsequent ones if one ends up in a dead-end. *)
 
+
+Hint Extern 5 => match goal with
+                |[H : RR (_ = _) |- _] =>
+                 progress (rewrite (unRR H) in *)
+                           end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *)
+                           end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _ _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *)
+                           end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _ _ _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *)
+                           end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _ _ _ _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *) 
+                end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _ _ _ _ _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *) 
+                end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _ _ _ _ _ _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *) 
+                end.
+Hint Extern 5 => match goal with
+                |[H : RR (forall _ _ _ _ _ _ _, _ = _) |- _] =>
+                 progress (rewrite (unRR H) in *) 
+                end.
 
 (**************************************)
 (************ 1. SYNTAX ***************)
@@ -466,11 +501,19 @@ Qed.
 
 Ltac destruct_tac :=
   match goal with
-    |[ H : context[string_dec ?x ?y] |- _ ] =>
+  |[ H : context[string_dec ?x ?y] |- _ ] =>
+   match goal with
+     [x : string, y : string |- _] =>
      destruct (string_dec x y); try subst
-    |[ H : _ |- context[string_dec ?x ?y] ] =>
-     destruct (string_dec x y); try subst
-    |[ a : _ * _ |- _] => destruct a
+   end
+  |[ H : context[string_dec ?x ?x] |- _ ] =>
+   match goal with
+     [x : string |- _] =>
+     destruct (string_dec x x); try subst
+   end   
+  |[ H : _ |- context[string_dec ?x ?y] ] =>
+   destruct (string_dec x y); try subst
+  |[ a : _ * _ |- _] => destruct a
   end.
 
 Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
@@ -531,7 +574,7 @@ Proof.
   hint_rewrite string_dec_ne.
   hint_rewrite string_dec_refl.
   intros.
-  induction Γ; simpl in *; repeat destruct_tac; crush.
+  induction Γ; simpl in *; repeat (iauto; destruct_tac; simpl; iauto).
 Qed.
 
 Lemma free_in_context : forall x e t Γ,
@@ -630,18 +673,24 @@ Proof.
 
   (* var *)
   simpl in *. destruct_tac; crush.
+  destruct_tac.
   eapply context_invariance with (Γ := nil); iauto.
   intros.
+  exfalso; iauto.
   exfalso; iauto.
 
   (* abs *)
   simpl in *.
   destruct_tac; iauto.
+  destruct_tac; iauto.
   (* <> *)
+  assert (s <> x) by iauto.
+  rewrite (unRR Hint0). 
   econstructor.
   use_ih_tac.
   eapply context_invariance; iauto.
   intros. simpl. destruct_tac; crush.
+  iauto.
 Qed.
 
 Lemma sn_types : forall t e, SN t e -> nil |-- e t.
@@ -1237,7 +1286,8 @@ Proof.
   eapply context_invariance. iauto.
   intros. simpl. rewrite extend_drop.
   repeat destruct_tac. simpl. crush. iauto.
-  iauto. unfold extend. rewrite <- lookup_mextend.
+  iauto. unfold extend.
+  rewrite <- lookup_mextend.
   simpl. destruct_tac; iauto. iauto.
 Qed.
 
@@ -1294,8 +1344,8 @@ Qed.
 Ltac branch boo e ife :=
     eapply anti_reduct with (e' := e); crush;
     eapply multi_trans with (b := ife);
-    iauto;
-    eapply multi_context; iauto.
+    iauto';
+    eapply multi_context; iauto'.
 
 Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       Γ |= Σ ->
@@ -1307,27 +1357,65 @@ Proof.
   hint sn_typable_empty.
   hint preservation.
   hint_rewrite close_if.
-  intros; crush;
+  intros.
+
+  crush. 
   match goal with
     |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
      invert H1
+  end.
+  crush. 
+  match goal with
+  |[H0: value ?x, H1: multi step _ ?x |- _] =>
+   assert (nil |-- x Bool) by iauto;
+     destruct x; iauto; try solve [inversion H0]
   end;
-  crush;
+
+  crush.
+
+  match goal with
+  |[H : value (Const ?b) |- _] =>
+   destruct b
+  end; 
+  rewrite (unRR Hint1);
+  match goal with
+  |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
+   branch true e (If (Const true) e n)
+  |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
+   branch false e (If (Const false) n e)
+  end.
+
+  match goal with
+    |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
+    |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
+  end.
+
+
+  rewrite (unRR Hint1).
+
   match goal with
     |[H0: value ?x, H1: multi step _ ?x |- _] =>
      assert (nil |-- x Bool) by iauto;
        destruct x; iauto; try solve [inversion H0]
-  end;
-  try (match goal with
-         |[H : value (Const ?b) |- _] =>
-          destruct b
-       end;
-       match goal with
-         |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
-          branch true e (If (Const true) e n)
-         |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
-          branch false e (If (Const false) n e)
-       end);
+  end.
+
+  match goal with
+  |[H : value (Const ?b) |- _] =>
+   destruct b
+  end; 
+  match goal with
+  |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
+   branch true e (If (Const true) e n)
+  |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
+   branch false e (If (Const false) n e)
+  end.
+
+
+  match goal with
+    |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
+    |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
+  end.
+
   match goal with
     |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
     |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
@@ -1350,7 +1438,8 @@ Proof.
            |[H: SN _ _ |- _] =>
             eapply sn_halts in H; invert H
          end;
-  crush;
+  crush.
+  rewrite (unRR Hint0).
   match goal with
     |[H1: multi step ?e1 ?v1,
           H2: multi step ?e2 ?v2 |-
