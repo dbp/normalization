@@ -479,10 +479,10 @@ Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
                              lookup Γ x = Some t ->
                              exists v, lookup Σ x = Some v.
 Proof.
-  Hint Extern 1 => destruct_tac.
   intros Γ Σ H.
   induction H; intros;
-  simpl in *; iauto'; crush.
+    simpl in *; iauto'; crush;
+  destruct_tac; iauto'.
 Qed.
 
 
