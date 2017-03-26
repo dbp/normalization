@@ -13,13 +13,21 @@ Tactic Notation "hint" constr(E) :=
   let t := type of E in
   assert (H : t) by (exact E).
 
+Tactic Notation "hint_rewrite" constr(E) := hint E.
+
 (* NOTE(dbp 2017-03-25): We want _local_ rewrites, so we use the same strategy
    as local apply - get them into our hypothesis with `hint`, and then rewrite
    based on that. To do that, we have a general rule that tries to rewrite based
    on hypothesis that end in an equality. *)
 Hint Extern 5 => match goal with
-                |[H : forall _, forall _, forall _, forall _, _ -> _ -> _ = _ |- _] =>
-                 progress (rewrite H)
+                |[H : forall _ _ _ _, _ -> _ -> _ = _ |- _] =>
+                 progress (rewrite H in *)
+                |[H : forall _ _, _ -> forall _, _ = _ |- _] =>
+                 progress (rewrite H in *)
+                |[H : forall _ _ _ _ _, _ -> _ = _ |- _] =>
+                 progress (rewrite H in *)
+                |[H : forall _ _ _ _, _ -> _ = _ |- _] =>
+                 progress (rewrite H in *)
                 end.
 
 
@@ -487,10 +495,10 @@ Qed.
 
 Lemma close_closed : forall Σ e, closed e -> close Σ e = e.
 Proof.
-  Hint Rewrite sub_closed.
+  hint_rewrite sub_closed.
   unfold closed in *;
   intro Σ.
-  induction Σ; crush; iauto.
+  induction Σ; crush; iauto'.
 Qed.
 
 Lemma close_var : forall Σ x e, closed_env Σ ->
@@ -518,7 +526,8 @@ Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
                       x <> y ->
                       lookup (drop x Γ) y = lookup Γ y.
 Proof.
-  Hint Rewrite string_dec_ne string_dec_refl.
+  hint_rewrite string_dec_ne.
+  hint_rewrite string_dec_refl.
   intros.
   induction Γ; simpl in *; repeat destruct_tac; crush.
 Qed.
@@ -528,10 +537,13 @@ Lemma free_in_context : forall x e t Γ,
                           Γ |-- e t ->
                               exists t', lookup Γ x = Some t'.
 Proof.
-  intros.
-  induction H0; free_invert; crush; iauto.
+  hint_rewrite string_dec_ne.
+  hint_rewrite string_dec_refl.
 
-  rewrite lookup_drop in *; iauto.
+  intros.
+  induction H0; free_invert; crush; iauto'.
+
+  rewrite lookup_drop in *; iauto'.
 Qed.
 
 Lemma typable_empty_closed : forall e t, nil |-- e t -> closed e.
@@ -604,6 +616,8 @@ Lemma substitution_preserves_typing : forall Γ x t v e t',
      Γ |-- ([x:=v]e) t.
 Proof.
   hint free_closed.
+  hint_rewrite string_dec_ne.
+  hint_rewrite string_dec_refl.
   intros.
   generalize dependent Γ.
   generalize dependent t.
@@ -1212,6 +1226,9 @@ Lemma TAbs_typing : forall Γ Σ x e t t',
                       nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
 Proof.
   hint lookup_drop.
+  hint_rewrite string_dec_ne.
+  hint_rewrite string_dec_refl.
+
   intros.
   econstructor. eapply close_preserves.
   eapply fulfills_drop. iauto.
@@ -1229,7 +1246,7 @@ Lemma TAbs_app : forall x t Σ e xh,
                    multi step (App (Abs x t (close (drop x Σ) e)) xh)
                          (close (extend (drop x Σ) x xh) e).
 Proof.
-  hint sub_close_extend.
+  hint_rewrite sub_close_extend.
 
   intros; iauto'.
 Qed.
@@ -1323,7 +1340,7 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                          (close Σ (Pair e1 e2)).
 Proof.
   hint sn_typable_empty.
-  Hint Rewrite close_pair.
+  hint_rewrite close_pair.
   intros.
 
   crush; 
