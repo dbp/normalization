@@ -13,6 +13,15 @@ Tactic Notation "hint" constr(E) :=
   let t := type of E in
   assert (H : t) by (exact E).
 
+(* NOTE(dbp 2017-03-25): We want _local_ rewrites, so we use the same strategy
+   as local apply - get them into our hypothesis with `hint`, and then rewrite
+   based on that. To do that, we have a general rule that tries to rewrite based
+   on hypothesis that end in an equality. *)
+Hint Extern 5 => match goal with
+                |[H : forall _, forall _, forall _, forall _, _ -> _ -> _ = _ |- _] =>
+                 progress (rewrite H)
+                end.
+
 
 (**************************************)
 (************ 1. SYNTAX ***************)
@@ -1220,10 +1229,9 @@ Lemma TAbs_app : forall x t Σ e xh,
                    multi step (App (Abs x t (close (drop x Σ) e)) xh)
                          (close (extend (drop x Σ) x xh) e).
 Proof.
-  intros.
-  econstructor. econstructor. econstructor.
-  econstructor. econstructor. iauto. simpl.
-  rewrite sub_close_extend; crush.
+  hint sub_close_extend.
+
+  intros; iauto'.
 Qed.
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
@@ -1315,9 +1323,10 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                          (close Σ (Pair e1 e2)).
 Proof.
   hint sn_typable_empty.
-
   Hint Rewrite close_pair.
-  intros. crush;
+  intros.
+
+  crush; 
   repeat match goal with
            |[H: SN _ _ |- _] =>
             eapply sn_halts in H; invert H
