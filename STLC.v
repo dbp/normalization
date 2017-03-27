@@ -1190,18 +1190,18 @@ Proof.
   hint step_deterministic.
   intros. unfold halts.
   split; intros; crush;
-  try solve[exists x; iauto].
+  try solve[exists x; eauto].
   match goal with
     |[H: multi step _ _ |- _] => invert H; subst
   end;
-  try solve[exfalso; eapply values_dont_step; iauto];
+  try solve[exfalso; eapply values_dont_step; eauto];
   match goal with
-    |[H: value ?x |- _] => exists x; iauto
+    |[H: value ?x |- _] => exists x; eauto
   end;
   match goal with
     |[H1: multi step ?a _, H2: step ?e ?a,
       H3: step ?e ?b |- multi step ?b _ /\ value _] =>
-     assert (a = b) by iauto; subst; iauto
+     assert (a = b) by iauto; subst; eauto
   end.
 Qed.
 
@@ -1213,14 +1213,14 @@ Proof.
   hint step_context.
   hint preservation_step.
 
-  induction t; intros e e' H H0; crush; iauto;
+  induction t; intros e e' H H0; crush; eauto;
   try match goal with
         |[_: halts ?e, _: step ?e ?e' |- halts ?e'] =>
-         eapply step_preserves_halting with (e:=e); iauto
+         eapply step_preserves_halting with (e:=e); eauto
       end;
   match goal with
     |[H: forall _ _, _ -> SN ?t _ -> _ |- SN ?t _] => eapply H
-  end; iauto'.
+  end; eauto.
 Qed.
 
 Lemma multistep_preserves_sn : forall t e e',
@@ -1230,7 +1230,7 @@ Lemma multistep_preserves_sn : forall t e e',
 Proof.
   hint step_preserves_sn.
   intros.
-  induction H; iauto.
+  induction H; eauto.
 Qed.
 
 
@@ -1271,8 +1271,8 @@ Proof.
   hint lookup_fulfill_sn.
   hint fulfill_closed.
   intros.
-  destruct (lookup_fulfill_v H x H0); iauto.
-  rewrite close_var with (e := x0); iauto.
+  destruct (lookup_fulfill_v H x H0); eauto.
+  rewrite close_var with (e := x0); eauto.
 Qed.
 
 Lemma TAbs_typing : forall Γ Σ x e t t',
@@ -1304,7 +1304,7 @@ Lemma TAbs_app : forall x t Σ e xh,
 Proof.
   hint_rewrite sub_close_extend.
 
-  intros; iauto'.
+  intros; eauto.
 Qed.
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
@@ -1322,15 +1322,15 @@ Proof.
   hint sn_typable_empty.
   hint @multi_trans.
   intros.
-  crush; iauto.
+  crush; eauto.
 
-  assert (HH: halts s) by (hint sn_halts; iauto).
+  assert (HH: halts s) by (hint sn_halts; eauto).
   inversion HH as [xh MS]. crush.
-  assert (SN t xh) by (eapply multistep_preserves_sn; iauto).
-  assert (closed xh) by (eapply sn_closed; iauto).
+  assert (SN t xh) by (eapply multistep_preserves_sn; eauto).
+  assert (closed xh) by (eapply sn_closed; eauto).
 
 
-  eapply anti_reduct with (e' := close (extend (drop x Σ) x xh) e); try solve [crush]; try solve [iauto'].
+  eapply anti_reduct with (e' := close (extend (drop x Σ) x xh) e); try solve [crush]; try solve [eauto].
   eapply multi_trans with (b := (App (Abs x t (close (drop x Σ) e)) xh)); iauto';
   eapply multi_context with (e1 := s) (e2 := xh); iauto'.
 Qed.
@@ -1372,7 +1372,7 @@ Proof.
   match goal with
   |[H0: value ?x, H1: multi step _ ?x |- _] =>
    assert (nil |-- x Bool) by iauto;
-     destruct x; iauto; try solve [inversion H0]
+     destruct x; eauto; try solve [inversion H0]
   end;
 
   crush.
@@ -1388,6 +1388,8 @@ Proof.
   |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
    branch false e (If (Const false) n e)
   end.
+
+  all: has_type.
 Qed.
 
 Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
@@ -1418,10 +1420,10 @@ Proof.
   match goal with
     |[H: multi step ?e ?v |-
       multi step (Pair ?e _) (Pair ?v _)] =>
-     eapply (multi_context H); iauto
+     eapply (multi_context H); eauto
     |[H: multi step ?e ?v |-
       multi step (Pair _ ?e) (Pair _ ?v)] =>
-     eapply (multi_context H); iauto
+     eapply (multi_context H); eauto
   end.
 Qed.
 
@@ -1454,7 +1456,7 @@ Proof.
   hint fulfills_drop.
   intros.
   generalize dependent Σ.
-  induction H; intros; iauto'.
+  induction H; intros; eauto.
 Qed.
 
 Theorem strong_normalization : forall e t,
@@ -1464,5 +1466,5 @@ Proof.
   hint fundamental.
   hint sn_halts.
   intros.
-  assert (SN t (close nil e)); iauto.
+  assert (SN t (close nil e)); eauto.
 Qed.
