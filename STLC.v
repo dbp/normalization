@@ -12,7 +12,7 @@ Ltac invert H := inversion H; clear H; try subst.
 (* NOTE(dbp 2017-03-26): Often when inverting, we only want to handle
    cases that are _not_ variables. This will fail if C is a variable
    of type T *)
-Ltac is_var C T :=
+Ltac not_var C T :=
   match goal with
   |[ C' : T |- _ ] =>
    match C with
@@ -27,6 +27,17 @@ Tactic Notation "hint" constr(E) :=
   let t := type of E in
   assert (H : t) by (exact E).
 
+Tactic Notation "hint" constr(E) "," constr(E1) := hint E; hint E1.
+Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) :=
+  hint E; hint E1; hint E2.
+Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) :=
+  hint E; hint E1; hint E2; hint E3.
+Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) "," constr(E4) :=
+  hint E; hint E1; hint E2; hint E3; hint E4.
+Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) "," constr(E4) "," constr(E5) :=
+  hint E; hint E1; hint E2; hint E3; hint E4; hint E5.
+
+
 Inductive RR (A : Prop) : Prop :=
 | rewrite_rule : forall a : A, RR A.
 
@@ -39,6 +50,14 @@ Tactic Notation "hint_rewrite" constr(E) :=
   let H := fresh "Hint" in
   let t := type of E in
   assert (H : RR t) by (exact (rewrite_rule E)).
+
+Tactic Notation "hint_rewrite" constr(E) "," constr(E1) :=
+  hint_rewrite E; hint_rewrite E1.
+Tactic Notation "hint_rewrite" constr(E) "," constr(E1) "," constr(E2) :=
+  hint_rewrite E; hint_rewrite E1; hint_rewrite E2.
+Tactic Notation "hint_rewrite" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) :=
+  hint_rewrite E; hint_rewrite E1; hint_rewrite E2; hint_rewrite E3.
+
 
 Hint Extern 5 => match goal with
                 |[H : RR (_ = _) |- _] =>
@@ -315,6 +334,11 @@ Qed.
 Definition halts  (e:exp) : Prop :=
   exists e', multi step e e' /\  value e'.
 
+Ltac halts :=
+  match goal with
+  |[H: halts _ |- _ ] => invert H
+  end.
+
 Fixpoint SN (T : ty) (t : exp) : Prop :=
   (nil |-- t T) /\ halts t /\
   (match T with
@@ -362,19 +386,9 @@ unfolded, the constructor won't match directly, so we try to use it anyway. *)
 Ltac plug := let c := constr:(context) in
              match goal with
              |[H : plug ?C1 _ _ |- _ ] =>
-              is_var C1 c; invert H
+              not_var C1 c; invert H
              end.
 
-Hint Extern 5 => plug.
-
-Hint Extern 5 => match goal with
-                |[IH : forall x, _ -> ?P x = ?Q x,
-                    H: ?P ?x = ?y
-                    |- ?Q ?x = ?y] => rewrite <- (IH x)
-                |[IH : forall x, _ -> ?Q x = ?P x,
-                    H: ?P ?x = ?y
-                    |- ?Q ?x = ?y] => rewrite (IH x)
-                end.
 
 Ltac use_ih_tac :=
   match goal with
@@ -437,7 +451,7 @@ Proof.
     |[IH : context[_:?P -> _],
           H : ?P |- _] => apply IH in H; inversion H
       end;
-  eexists; intros; eauto.
+  eexists; intros; repeat plug; eauto.
 Qed.
 
 Lemma step_context : forall C e1 e2,
@@ -460,8 +474,7 @@ Lemma multi_context : forall C e1 e2,
                         plug C e2 e2' ->
                         multi step e1' e2'.
 Proof.
-  hint plug_exists.
-  hint step_context.
+  hint plug_exists, step_context.
   intros C e1 e2 H.
   induction H; intros.
   rewrite (plug_same H H0); eauto.
@@ -572,8 +585,7 @@ Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
                       x <> y ->
                       lookup (drop x Γ) y = lookup Γ y.
 Proof.
-  hint_rewrite string_dec_ne.
-  hint_rewrite string_dec_refl.
+  hint_rewrite string_dec_ne, string_dec_refl.
   intros.
   induction Γ; simpl in *; repeat (eauto; destruct_tac; simpl; eauto).
 Qed.
@@ -583,8 +595,7 @@ Lemma free_in_context : forall x e t Γ,
                           Γ |-- e t ->
                               exists t', lookup Γ x = Some t'.
 Proof.
-  hint_rewrite string_dec_ne.
-  hint_rewrite string_dec_refl.
+  hint_rewrite string_dec_ne, string_dec_refl.
 
   intros.
   induction H0; free_invert; crush; eauto.
@@ -606,15 +617,13 @@ Qed.
 
 Lemma sn_closed : forall t e, SN t e -> closed e.
 Proof.
-  hint typable_empty_closed.
-  hint sn_typable_empty.
+  hint typable_empty_closed, sn_typable_empty.
   intros. eauto.
 Qed.
 
 Lemma fulfill_closed : forall Γ Σ, Γ |= Σ -> closed_env Σ.
 Proof.
-  hint typable_empty_closed.
-  hint sn_typable_empty.
+  hint typable_empty_closed, sn_typable_empty.
   
   intros.
   induction H; simpl; eauto.
@@ -634,6 +643,8 @@ Lemma context_invariance : forall Γ Γ' e t,
      (forall x, free_in x e -> lookup Γ x = lookup Γ' x)  ->
      Γ' |-- e t.
 Proof.
+  hint_rewrite lookup_drop.
+
   intros.
   generalize dependent Γ'.
   induction H; intros; crush;
@@ -641,8 +652,6 @@ Proof.
 
   econstructor; use_ih_tac. intros.
   simpl in *. destruct_tac; crush.
-  rewrite lookup_drop; eauto.
-  rewrite lookup_drop; eauto.
 Qed.
 
 Lemma free_closed : forall x v t, (nil |-- v t) ->
@@ -662,8 +671,7 @@ Lemma substitution_preserves_typing : forall Γ x t v e t',
      Γ |-- ([x:=v]e) t.
 Proof.
   hint free_closed.
-  hint_rewrite string_dec_ne.
-  hint_rewrite string_dec_refl.
+  hint_rewrite string_dec_ne, string_dec_refl.
   intros.
   generalize dependent Γ.
   generalize dependent t.
@@ -708,8 +716,7 @@ Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
                           (mextend G Γ) |-- e t ->
                           G |-- (close Σ e) t.
 Proof.
-  hint sn_typable_empty.
-  hint substitution_preserves_typing.
+  hint sn_typable_empty, substitution_preserves_typing.
   induction 1; intros;
   simpl in *; eauto.
 Qed.
@@ -782,8 +789,8 @@ Lemma plug_values : forall e v C, plug C e v ->
                              value v ->
                              value e.
 Proof.
-  intros.
-  induction H; inversion H0; eauto.
+  intros e v C P H.
+  induction P; value_invert; eauto.
 Qed.
 
 Lemma multi_subst : forall x v1 v2 e,
@@ -1018,7 +1025,7 @@ Proof.
   Ltac has_type := 
              match goal with
              |[H : nil |-- ?E ?T |- _ ] =>
-              is_var E exp; invert H
+              not_var E exp; invert H
              end.
 
   repeat plug. assert (t = t') by (eapply unique_typing; eauto).
@@ -1031,8 +1038,7 @@ Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
                                      step e1 e2 ->
                                      nil |-- e2 t.
 Proof.
-  hint preservation_plug.
-  hint preservation_prim_step.
+  hint preservation_plug, preservation_prim_step.
   intros.
   inversion H0; subst.
   match goal with
@@ -1057,9 +1063,7 @@ Lemma anti_reduct : forall e' e t, multi step e e' ->
                               nil |-- e t ->
                               SN t e.
 Proof.
-  hint sn_typable_empty.
-
-  hint @multi_trans.
+  hint sn_typable_empty, @multi_trans.
   intros.
   generalize dependent e.
   generalize dependent e'.
@@ -1210,8 +1214,7 @@ Lemma step_preserves_sn : forall t e e',
                             SN t e ->
                             SN t e'.
 Proof.
-  hint step_context.
-  hint preservation_step.
+  hint step_context, preservation_step.
 
   induction t; intros e e' H H0; crush; eauto;
   try match goal with
@@ -1258,8 +1261,7 @@ Lemma TConst_compat : forall Γ Σ b,
                         Γ |= Σ ->
                         SN Bool (close Σ (Const b)).
 Proof.
-  hint close_const.
-  hint halts_value.
+  hint close_const, halts_value.
   crush.
 Qed.
 
@@ -1268,8 +1270,7 @@ Lemma TVar_compat : forall Γ Σ x t,
                       lookup Γ x = Some t ->
                       SN t (close Σ (Var x)).
 Proof.
-  hint lookup_fulfill_sn.
-  hint fulfill_closed.
+  hint lookup_fulfill_sn, fulfill_closed.
   intros.
   destruct (lookup_fulfill_v H x H0); eauto.
   rewrite close_var with (e := x0); eauto.
@@ -1281,8 +1282,7 @@ Lemma TAbs_typing : forall Γ Σ x e t t',
                       nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
 Proof.
   hint lookup_drop.
-  hint_rewrite string_dec_ne.
-  hint_rewrite string_dec_refl.
+  hint_rewrite string_dec_ne, string_dec_refl.
 
   intros.
   econstructor. eapply close_preserves.
@@ -1314,13 +1314,8 @@ Lemma TAbs_compat : forall Γ Σ x e t t',
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
   hint_rewrite close_abs.
-  hint TAbs_typing.
-  hint lookup_fulfill_sn.
-  hint fulfill_closed.
-  hint TAbs_app.
-  hint halts_value.
-  hint sn_typable_empty.
-  hint @multi_trans.
+  hint TAbs_typing, lookup_fulfill_sn, fulfill_closed, TAbs_app, halts_value.
+  hint sn_typable_empty, @multi_trans.
   intros.
   crush; eauto.
 
@@ -1358,8 +1353,7 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
-  hint sn_typable_empty.
-  hint preservation.
+  hint sn_typable_empty, preservation.
   hint_rewrite close_if.
   intros.
 
@@ -1392,6 +1386,43 @@ Proof.
   all: has_type.
 Qed.
 
+Ltac kauto :=
+  repeat match goal with
+         |[|- ?P /\ ?Q] => try (solve [split; eauto] || (split; eauto; [idtac]))
+         |[H: ?P /\ ?Q |- _] => invert H
+         end.
+
+
+Lemma TPair_halts : forall Σ e1 e2, halts (close Σ e1) ->
+                               halts (close Σ e2) ->
+                               halts (Pair (close Σ e1) (close Σ e2)).
+Proof.
+  intros; 
+  repeat halts; (* Unfold halts to get values. *)
+  kauto.
+
+  match goal with
+  |[H1: value ?v1, H2: value ?v2 |- _ ] =>
+   (* Claim that we will step to a pair of the two values that came from inputs. *)
+   eexists (Pair v1 v2) 
+  end; kauto; 
+
+  match goal with
+  |[H: multi step ?e ?v' |- multi step _ (Pair ?v ?v')] =>
+   (* Use transitivity with value (that has stepped) / expression (that will step) pair. *)
+   eapply multi_trans with (b := (Pair v e))
+  end;
+
+  (* Lift stepping of term to stepping in (Pair [.] e) or (Pair e [.]) context. *)
+  match goal with
+  |[H: multi step _ ?v |- multi step (Pair ?e _) (Pair ?v _)] =>
+   not_var e exp; eapply (multi_context H); eauto
+  |[H: multi step _ ?v |- multi step (Pair _ ?e) (Pair _ ?v)] =>
+   not_var e exp; eapply (multi_context H); eauto
+  end.
+Qed.
+ 
+
 Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                       Γ |= Σ ->
                       SN t1 (close Σ e1) ->
@@ -1399,32 +1430,9 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
                       SN (Product t1 t2)
                          (close Σ (Pair e1 e2)).
 Proof.
-  hint sn_typable_empty.
   hint_rewrite close_pair.
-  intros.
-
-  crush; 
-  repeat match goal with
-           |[H: SN _ _ |- _] =>
-            eapply sn_halts in H; invert H
-         end;
-  crush.
-  rewrite (unRR Hint0).
-  match goal with
-    |[H1: multi step ?e1 ?v1,
-          H2: multi step ?e2 ?v2 |-
-      halts (Pair ?e1 ?e2)] => eexists (Pair v1 v2)
-  end;
-  crush;
-  eapply multi_trans with (b := (Pair x0 (close Σ e2)));
-  match goal with
-    |[H: multi step ?e ?v |-
-      multi step (Pair ?e _) (Pair ?v _)] =>
-     eapply (multi_context H); eauto
-    |[H: multi step ?e ?v |-
-      multi step (Pair _ ?e) (Pair _ ?v)] =>
-     eapply (multi_context H); eauto
-  end.
+  hint sn_typable_empty, sn_halts, TPair_halts.
+  intros; unfold SN; kauto. 
 Qed.
 
 
@@ -1447,12 +1455,7 @@ Theorem fundamental : forall e t Γ Σ,
                             Γ |= Σ ->
                             SN t (close Σ e).
 Proof.
-  hint TConst_compat.
-  hint TVar_compat.
-  hint TAbs_compat.
-  hint TApp_compat.
-  hint TIf_compat.
-  hint TPair_compat.
+  hint TConst_compat, TVar_compat, TAbs_compat, TApp_compat, TIf_compat, TPair_compat.
   hint fulfills_drop.
   intros.
   generalize dependent Σ.
@@ -1463,8 +1466,7 @@ Theorem strong_normalization : forall e t,
                                  nil |-- e t ->
                                  halts e.
 Proof.
-  hint fundamental.
-  hint sn_halts.
+  hint fundamental, sn_halts.
   intros.
   assert (SN t (close nil e)); eauto.
 Qed.
