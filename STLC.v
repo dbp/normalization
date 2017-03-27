@@ -437,7 +437,7 @@ Proof.
     |[IH : context[_:?P -> _],
           H : ?P |- _] => apply IH in H; inversion H
       end;
-  eexists; intros; repeat plug; iauto.
+  eexists; intros; iauto'.
 Qed.
 
 Lemma step_context : forall C e1 e2,
@@ -764,8 +764,8 @@ Proof.
   intros.
   generalize dependent t.
   induction H0; intros;
-  repeat plug; has_type_invert;
-  iauto.
+  has_type_invert;
+  iauto'.
 Qed.
 
 Ltac step_invert :=
@@ -1012,16 +1012,21 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
                             nil |-- e2' t.
 Proof.
   intro C.
-  induction C; intros; repeat plug;
-  iauto; try solve
-             [inversion H; subst;
-              econstructor;
-              iauto].
+  induction C; intros; iauto.
 
-  (* hole *)
-  assert (t = t').
-  eapply unique_typing; iauto.
+
+  Ltac has_type := 
+             match goal with
+             |[H : nil |-- ?E ?T |- _ ] =>
+              is_var E exp; invert H
+             end.
+
+  Hint Extern 5 => has_type.
+
+  repeat plug. assert (t = t') by (eapply unique_typing; iauto).
   subst; iauto.
+
+  all: repeat plug; has_type; iauto.
 Qed.
 
 Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
@@ -1384,42 +1389,6 @@ Proof.
    branch true e (If (Const true) e n)
   |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
    branch false e (If (Const false) n e)
-  end.
-
-  match goal with
-    |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
-    |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
-  end.
-
-
-  rewrite (unRR Hint1).
-
-  match goal with
-    |[H0: value ?x, H1: multi step _ ?x |- _] =>
-     assert (nil |-- x Bool) by iauto;
-       destruct x; iauto; try solve [inversion H0]
-  end.
-
-  match goal with
-  |[H : value (Const ?b) |- _] =>
-   destruct b
-  end; 
-  match goal with
-  |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
-   branch true e (If (Const true) e n)
-  |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
-   branch false e (If (Const false) n e)
-  end.
-
-
-  match goal with
-    |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
-    |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
-  end.
-
-  match goal with
-    |[H: (nil |-- (Abs _ _ _)) Bool |- _] => invert H
-    |[H: (nil |-- (Pair _ _)) Bool |- _] => invert H
   end.
 Qed.
 
