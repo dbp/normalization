@@ -198,7 +198,7 @@ Inductive free_in : string -> exp -> Prop :=
 
 Hint Constructors free_in.
 
-Ltac free_invert :=
+Ltac free_in :=
   match goal with
     |[H : free_in _ _ |- _] => invert H
   end.
@@ -247,6 +247,11 @@ where "Γ '|--' e" := (has_type Γ e).
 
 Hint Constructors has_type ty exp value.
 
+Ltac has_type := 
+  match goal with
+  |[H : _ |-- ?E ?T |- _ ] =>
+   not_var E exp; invert H
+  end.
 
 
 (**************************************)
@@ -598,7 +603,7 @@ Proof.
   hint_rewrite string_dec_ne, string_dec_refl.
 
   intros.
-  induction H0; free_invert; crush; eauto.
+  induction H0; free_in; crush; eauto.
 
   rewrite lookup_drop in *; eauto.
 Qed.
@@ -659,11 +664,6 @@ Lemma free_closed : forall x v t, (nil |-- v t) ->
 Proof.
   intros; destruct (free_in_context H0 H); crush.
 Qed.
-
-Ltac has_type_invert :=
-  match goal with
-    |[HT : (_ |-- _) _ |- _] => inversion HT; clear HT
-  end.
 
 Lemma substitution_preserves_typing : forall Γ x t v e t',
      (extend Γ x t') |-- e t  ->
@@ -750,8 +750,8 @@ Proof.
   hint lookup_drop.
   intros.
   eapply context_invariance; eauto;
-  intros;
-  free_invert; has_type_invert;
+    intros;
+  free_in; has_type;
   simpl; destruct_tac; crush.
 Qed.
 
@@ -771,7 +771,9 @@ Proof.
   intros.
   generalize dependent t.
   induction H0; intros;
-  has_type_invert;
+  match goal with
+  |[H : _ |-- _ _ |- _] => invert H
+  end;
   eauto.
 Qed.
 
@@ -985,7 +987,7 @@ Lemma preservation_prim_step : forall e1 e2 t,
 Proof.
   intros.
   step_prim_invert; subst; eauto;
-  has_type_invert; subst; eauto;
+  has_type; subst; eauto;
   eapply substitution_preserves_typing; eauto;
   match goal with
     |[H: (nil |-- _) (Fun _ _) |- _] => inversion H
@@ -1020,13 +1022,6 @@ Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
 Proof.
   intro C.
   induction C; intros.
-
-
-  Ltac has_type := 
-             match goal with
-             |[H : nil |-- ?E ?T |- _ ] =>
-              not_var E exp; invert H
-             end.
 
   repeat plug. assert (t = t') by (eapply unique_typing; eauto).
   subst; eauto.
@@ -1346,6 +1341,19 @@ Ltac branch boo e ife :=
     iauto';
     eapply multi_context; iauto'.
 
+
+Ltac kauto :=
+  repeat match goal with
+         |[|- ?P /\ ?Q] => try (solve [split; eauto] || (split; eauto; [idtac]))
+         |[H: ?P /\ ?Q |- _] => invert H
+         end.
+
+Lemma TIf_halts : forall Σ e1 e2 e3, halts (close Σ e1) ->
+                        halts (close Σ e2) ->
+                        halts (close Σ e3) ->
+                        halts (If (close Σ e1) (close Σ e2) (close Σ e3)).
+Admitted.
+
 Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       Γ |= Σ ->
                       SN Bool (close Σ e1) ->
@@ -1353,9 +1361,34 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
-  hint sn_typable_empty, preservation.
+  hint sn_typable_empty, preservation, TIf_halts, sn_halts.
   hint_rewrite close_if.
   intros.
+
+  (* not_var t. *)
+  (* destruct  *)
+
+  (* simpl in *. kauto. *)
+  (* match goal with *)
+  (*   |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] => *)
+  (*    invert H1 *)
+  (* end; kauto. *)
+
+  (* match goal with *)
+  (* |[H0: value ?x, H1: multi step _ ?x |- _] => *)
+  (*  assert (nil |-- x Bool) by iauto; *)
+  (*    destruct x; eauto; try solve [inversion H0] *)
+  (* end.  *)
+
+  (* match goal with *)
+  (* |[H : value (Const ?b) |- _] => *)
+  (*  destruct b *)
+  (* end. *)
+
+  
+
+
+  (* ----- *)
 
   crush. 
   match goal with
@@ -1375,7 +1408,7 @@ Proof.
   |[H : value (Const ?b) |- _] =>
    destruct b
   end; 
-  rewrite (unRR Hint1);
+  rewrite (unRR Hint3);
   match goal with
   |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
    branch true e (If (Const true) e n)
@@ -1385,12 +1418,6 @@ Proof.
 
   all: has_type.
 Qed.
-
-Ltac kauto :=
-  repeat match goal with
-         |[|- ?P /\ ?Q] => try (solve [split; eauto] || (split; eauto; [idtac]))
-         |[H: ?P /\ ?Q |- _] => invert H
-         end.
 
 
 Lemma TPair_halts : forall Σ e1 e2, halts (close Σ e1) ->
@@ -1455,7 +1482,8 @@ Theorem fundamental : forall e t Γ Σ,
                             Γ |= Σ ->
                             SN t (close Σ e).
 Proof.
-  hint TConst_compat, TVar_compat, TAbs_compat, TApp_compat, TIf_compat, TPair_compat.
+  hint TConst_compat, TVar_compat, TAbs_compat.
+  hint TApp_compat, TIf_compat, TPair_compat.
   hint fulfills_drop.
   intros.
   generalize dependent Σ.
