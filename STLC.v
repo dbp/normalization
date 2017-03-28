@@ -92,6 +92,17 @@ Hint Extern 5 => match goal with
                  progress (rewrite (unRR H) in *) 
                 end.
 
+
+Ltac simplify :=
+  repeat (simpl in *;
+          match goal with
+          |[|- ?P /\ ?Q] => try (solve [split; eauto 2] || (split; eauto 2; [idtac]))
+          |[H: ?P /\ ?Q |- _] => invert H
+          |[a: ?x * ?y |- _] => destruct a
+          |[H: True |- _] => clear H
+          end).
+
+
 (**************************************)
 (************ 1. SYNTAX ***************)
 (**************************************)
@@ -118,6 +129,11 @@ Inductive value : exp -> Prop :=
 | VBool : forall b, value (Const b)
 | VAbs : forall x t e, value (Abs x t e)
 | VPair : forall v1 v2, value v1 -> value v2 -> value (Pair v1 v2).
+
+Ltac value :=
+  match goal with
+    |[H : value _ |- _] => invert H
+  end.
 
 (**************************************)
 (**** 2. SUBSTITUTION/ENVIRONMENTS ****)
@@ -289,6 +305,11 @@ Inductive plug : context -> exp -> exp -> Prop :=
 
 Hint Constructors plug.
 
+Ltac plug := let c := constr:(context) in
+             match goal with
+             |[H : plug ?C1 _ _ |- _ ] =>
+              not_var C1 c; invert H
+             end.
 
 Inductive step_prim : exp -> exp -> Prop :=
 | SBeta : forall x t e v, value v -> step_prim (App (Abs x t e) v)
@@ -298,6 +319,10 @@ Inductive step_prim : exp -> exp -> Prop :=
 
 Hint Constructors step_prim.
 
+Ltac step_prim :=
+  match goal with
+    |[S : step_prim _ _ |- _] => invert S
+  end.
 
 Inductive step : exp -> exp -> Prop :=
 | Step : forall C e1 e2 e1' e2', plug C e1 e1' ->
@@ -306,6 +331,11 @@ Inductive step : exp -> exp -> Prop :=
                             step e1' e2'.
 
 Hint Constructors step.
+
+Ltac step :=
+  match goal with
+    |[H : step _ _ |- _] => invert H
+  end.
 
 Inductive multi A (R : A -> A -> Prop) : A -> A -> Prop :=
 | MultiRefl : forall x,
@@ -388,14 +418,7 @@ unfolded, the constructor won't match directly, so we try to use it anyway. *)
  *)
 
 
-Ltac plug := let c := constr:(context) in
-             match goal with
-             |[H : plug ?C1 _ _ |- _ ] =>
-              not_var C1 c; invert H
-             end.
-
-
-Ltac use_ih_tac :=
+Ltac completer :=
   match goal with
     |[IH : forall x, _ -> ?P x = ?Q x,
         H: ?P ?x = ?y
@@ -420,13 +443,7 @@ Lemma plug_same : forall C x e1 e2,
 Proof.
   intro C.
   induction C;
-    intros; repeat plug;
-    match goal with
-    |[ IH : forall _ _ _, plug _ _ _ -> plug _ _ _ -> _ = _,
-         H1 : plug _ ?x ?e1, H2 : plug _ ?x ?e2 |- _] =>
-     rewrite (IH x e1 e2); solve [auto]
-    | _ => solve [auto]
-    end.
+    intros; repeat plug; try completer; eauto.
 Qed.
 
 Lemma plug_exists : forall C e e' e1,
@@ -435,12 +452,16 @@ Lemma plug_exists : forall C e e' e1,
                       exists e1', plug C e1 e1'.
 Proof.
   intro C;
-    induction C; intros; repeat plug;
-  try match goal with
-        |[IH : forall _, _, H : plug C _ _ |- _ ] =>
-         eapply IH in H; eauto; inversion H
-      end;
-  eexists; eauto.
+    induction C; intros; repeat plug; 
+
+      (* This is uninteresting; the presence of existentials is only reason why
+         it isn't shorter. *)
+      try match goal with
+          |[IH : forall _, _, H : plug ?C _ _ |- _ ] =>
+           is_var C; eapply IH in H; eauto; inversion H
+          end;
+      
+      eexists; eauto.
 Qed.
 
 Lemma plug_compose : forall C C' e e' e'',
@@ -452,6 +473,8 @@ Lemma plug_compose : forall C C' e e' e'',
                                  plug C'' e1 e3).
 Proof.
   induction 2;
+    (* Similar to last Lemma, this is essentially by induction; we just have to
+    do some work to use what the induction hypothesis tells us. *)
   try match goal with
     |[IH : context[_:?P -> _],
           H : ?P |- _] => apply IH in H; inversion H
@@ -467,8 +490,8 @@ Lemma step_context : forall C e1 e2,
                         step e1' e2'.
 Proof.
   intros.
-  inversion H; subst.
-  destruct (plug_compose H2 H0).
+  invert H.
+  destruct (plug_compose H2 H0). 
   eauto.
 Qed.
 
@@ -482,10 +505,13 @@ Proof.
   hint plug_exists, step_context.
   intros C e1 e2 H.
   induction H; intros.
-  rewrite (plug_same H H0); eauto.
-  assert (exists ex2, plug C x2 ex2). eauto.
-  crush.
-  assert (H5: step e1' x); eauto.
+
+  - match goal with
+    |[H1: plug _ _ ?e1, H2: plug _ _ ?e2 |- multi step ?e1 ?e2] =>
+     hint_rewrite (plug_same H1 H2)
+    end; eauto 2.
+  - assert (HF: exists ex2, plug C x2 ex2) by eauto.
+    invert HF; eauto.
 Qed.
 
 
@@ -493,7 +519,7 @@ Qed.
 Lemma close_const : forall Σ b, close Σ (Const b) = (Const b).
 Proof.
   intros.
-  induction Σ; iauto.
+  induction Σ; eauto; simpl in *; simplify; eauto.
 Qed.
 
 Lemma halts_value : forall v, value v -> halts v.
@@ -503,19 +529,26 @@ Qed.
 
 Lemma sn_halts : forall t e, SN t e -> halts e.
 Proof.
-  intros. destruct t; crush.
+  intros. destruct t;
+  unfold SN in *;
+  simplify;
+  eauto.
 Qed.
 
 Lemma string_dec_refl : forall T s (t:T) (f:T), (if string_dec s s then t else f) = t.
 Proof.
   intros.
-  destruct (string_dec s s). eauto. exfalso. eauto.
+  destruct (string_dec s s).
+  - eauto.
+  - exfalso; eauto.
 Qed.
 
 Lemma string_dec_ne : forall T s s' (t:T) (f:T), s <> s' -> (if string_dec s s' then t else f) = f.
 Proof.
   intros.
-  destruct (string_dec s s'). subst. contradiction H. eauto. reflexivity.
+  destruct (string_dec s s').
+  - subst. contradiction H. eauto.
+  - reflexivity.
 Qed.
 
 Ltac destruct_tac :=
@@ -543,7 +576,8 @@ Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
 Proof.
   intros Γ Σ H.
   induction H; intros;
-    simpl in *; eauto; crush;
+    simpl in *; eauto;
+  crush;
   destruct_tac; eauto.
 Qed.
 
@@ -653,9 +687,9 @@ Proof.
   intros.
   generalize dependent Γ'.
   induction H; intros; crush;
-  try solve [econstructor; use_ih_tac; crush].
+  try solve [econstructor; completer; crush].
 
-  econstructor; use_ih_tac. intros.
+  econstructor; completer. intros.
   simpl in *. destruct_tac; crush.
 Qed.
 
@@ -696,7 +730,7 @@ Proof.
   assert (s <> x) by eauto.
   rewrite (unRR Hint0). 
   econstructor.
-  use_ih_tac.
+  completer.
   eapply context_invariance; eauto.
   intros. simpl. destruct_tac; crush.
   eauto.
@@ -777,22 +811,14 @@ Proof.
   eauto.
 Qed.
 
-Ltac step_invert :=
-  match goal with
-    |[H : step _ _ |- _] => invert H
-  end.
 
-Ltac value_invert :=
-  match goal with
-    |[H : value _ |- _] => invert H
-  end.
 
 Lemma plug_values : forall e v C, plug C e v ->
                              value v ->
                              value e.
 Proof.
   intros e v C P H.
-  induction P; value_invert; eauto.
+  induction P; value; eauto.
 Qed.
 
 Lemma multi_subst : forall x v1 v2 e,
@@ -975,10 +1001,6 @@ Qed.
 *)
 
 
-Ltac step_prim_invert :=
-  match goal with
-    |[S : step_prim _ _ |- _] => invert S
-  end.
 
 Lemma preservation_prim_step : forall e1 e2 t,
                                  nil |-- e1 t ->
@@ -986,7 +1008,7 @@ Lemma preservation_prim_step : forall e1 e2 t,
                                  nil |-- e2 t.
 Proof.
   intros.
-  step_prim_invert; subst; eauto;
+  step_prim; subst; eauto;
   has_type; subst; eauto;
   eapply substitution_preserves_typing; eauto;
   match goal with
@@ -1078,7 +1100,7 @@ Qed.
 Lemma values_dont_step : forall v e, value v -> ~step v e.
 Proof.
   hint plug_values.
-  unfold not. intros. step_invert; value_invert;
+  unfold not. intros. step; value;
   match goal with
     |[H: plug _ _ (Const _) |- _] => invert H
     |[H: plug _ _ (Abs _ _ _) |- _] => invert H
@@ -1086,7 +1108,7 @@ Proof.
   end; subst; try (assert (value e1) by iauto;
                    inversion H;
                    subst);
-  step_prim_invert.
+  step_prim.
 Qed.
 
 Lemma step_prim_deterministic : forall e1 e2 e2',
@@ -1094,7 +1116,7 @@ Lemma step_prim_deterministic : forall e1 e2 e2',
                                   step_prim e1 e2' ->
                                   e2 = e2'.
 Proof.
-  intros. repeat step_prim_invert; eauto.
+  intros. repeat step_prim; eauto.
 Qed.
 
 Ltac smash :=
@@ -1174,7 +1196,7 @@ Lemma step_deterministic : forall e1 e2 e2',
                              e2 = e2'.
 Proof.
   induction 1; intros.
-  step_invert.
+  step.
   destruct (plug_step_uniq H H1 H3 H5); subst.
   assert (e2 = e3).
   apply (step_prim_deterministic H1 H5).
@@ -1342,17 +1364,25 @@ Ltac branch boo e ife :=
     eapply multi_context; iauto'.
 
 
-Ltac kauto :=
-  repeat match goal with
-         |[|- ?P /\ ?Q] => try (solve [split; eauto] || (split; eauto; [idtac]))
-         |[H: ?P /\ ?Q |- _] => invert H
-         end.
+Lemma TIf_const : forall t b e1 e2 e3, SN t e2 ->
+                                  SN t e3 ->
+                                  nil |-- e1 Bool ->
+                                  multi step e1 (Const b) ->
+                                  SN t (If e1 e2 e3).
+Proof.
+  hint sn_types.
+  intros.
+  destruct b.
+  - eapply anti_reduct with (e' := e2); eauto;
+      eapply multi_trans with (b := (If (Const true) e2 e3));
+      eauto;
+      eapply multi_context; eauto.
+  - eapply anti_reduct with (e' := e3); eauto;
+      eapply multi_trans with (b := (If (Const false) e2 e3));
+      eauto;
+      eapply multi_context; eauto.
+Qed.
 
-Lemma TIf_halts : forall Σ e1 e2 e3, halts (close Σ e1) ->
-                        halts (close Σ e2) ->
-                        halts (close Σ e3) ->
-                        halts (If (close Σ e1) (close Σ e2) (close Σ e3)).
-Admitted.
 
 Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       Γ |= Σ ->
@@ -1361,62 +1391,26 @@ Lemma TIf_compat : forall Γ Σ e1 e2 e3 t,
                       SN t (close Σ e3) ->
                       SN t (close Σ (If e1 e2 e3)).
 Proof.
-  hint sn_typable_empty, preservation, TIf_halts, sn_halts.
-  hint_rewrite close_if.
-  intros.
+  hint sn_typable_empty, sn_halts.
+  intros; simplify;
+  rewrite close_if.
 
-  (* not_var t. *)
-  (* destruct  *)
-
-  (* simpl in *. kauto. *)
-  (* match goal with *)
-  (*   |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] => *)
-  (*    invert H1 *)
-  (* end; kauto. *)
-
-  (* match goal with *)
-  (* |[H0: value ?x, H1: multi step _ ?x |- _] => *)
-  (*  assert (nil |-- x Bool) by iauto; *)
-  (*    destruct x; eauto; try solve [inversion H0] *)
-  (* end.  *)
-
-  (* match goal with *)
-  (* |[H : value (Const ?b) |- _] => *)
-  (*  destruct b *)
-  (* end. *)
-
-  
-
-
-  (* ----- *)
-
-  crush. 
+  (* We first figure out if the test expression evaluates to true or false. *) 
   match goal with
-    |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
+  |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
+   (* By figuring out the value that it runs to *)
      invert H1
-  end.
-  crush. 
+  end; simplify;
   match goal with
   |[H0: value ?x, H1: multi step _ ?x |- _] =>
-   assert (nil |-- x Bool) by iauto;
-     destruct x; eauto; try solve [inversion H0]
-  end;
+   (* And then using preservation to show that the value must be a bool. *)
+   assert (nil |-- x Bool) by (hint preservation; eauto);
+     destruct x; eauto; try solve [has_type]; try solve [inversion H0]
+  end; simplify.
 
-  crush.
-
-  match goal with
-  |[H : value (Const ?b) |- _] =>
-   destruct b
-  end; 
-  rewrite (unRR Hint3);
-  match goal with
-  |[H: value (Const true) |- SN _ (If _ ?e ?n)] =>
-   branch true e (If (Const true) e n)
-  |[H: value (Const false) |- SN _ (If _ ?n ?e)] =>
-   branch false e (If (Const false) n e)
-  end.
-
-  all: has_type.
+  (* At which point, the rest follows by case analylis on the bool and
+     anti-reduction. *)
+  hint TIf_const; eauto.
 Qed.
 
 
@@ -1426,13 +1420,13 @@ Lemma TPair_halts : forall Σ e1 e2, halts (close Σ e1) ->
 Proof.
   intros; 
   repeat halts; (* Unfold halts to get values. *)
-  kauto.
+  simplify.
 
   match goal with
   |[H1: value ?v1, H2: value ?v2 |- _ ] =>
    (* Claim that we will step to a pair of the two values that came from inputs. *)
    eexists (Pair v1 v2) 
-  end; kauto; 
+  end; simplify; 
 
   match goal with
   |[H: multi step ?e ?v' |- multi step _ (Pair ?v ?v')] =>
@@ -1459,7 +1453,7 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
 Proof.
   hint_rewrite close_pair.
   hint sn_typable_empty, sn_halts, TPair_halts.
-  intros; unfold SN; kauto. 
+  intros; unfold SN; simplify. 
 Qed.
 
 
