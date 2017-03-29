@@ -569,7 +569,7 @@ Proof.
   - reflexivity.
 Qed.
 
-Ltac destruct_tac :=
+Ltac string :=
   match goal with
   |[ H : context[string_dec ?x ?y] |- _ ] =>
    match goal with
@@ -595,7 +595,7 @@ Proof.
   induction H; intros;
     simpl in *; eauto;
   crush;
-  destruct_tac; eauto.
+  string; eauto.
 Qed.
 
 
@@ -605,7 +605,7 @@ Proof.
   intros.
   induction e; simpl;
   try solve [intuition (eauto; crush)];
-  destruct_tac; crush.
+  string; crush.
 Qed.
 
 Lemma close_closed : forall Σ e, closed e -> close Σ e = e.
@@ -622,7 +622,7 @@ Lemma close_var : forall Σ x e, closed_env Σ ->
 Proof.
   hint close_closed.
   intros.
-  induction Σ; crush; repeat (simplify; destruct_tac); crush.
+  induction Σ; crush; repeat (simplify; string); crush.
 Qed.
 
 Lemma lookup_fulfill_sn : forall Γ Σ,
@@ -634,7 +634,7 @@ Lemma lookup_fulfill_sn : forall Γ Σ,
 Proof.
   intros Γ Σ H.
   induction H; intros; [crush|idtac].
-  simpl in *; destruct_tac; eauto; crush.
+  simpl in *; string; eauto; crush.
 Qed.
 
 Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
@@ -644,7 +644,7 @@ Proof.
   hint_rewrite string_dec_ne, string_dec_refl.
   intros.
   induction Γ; 
-    repeat (eauto; simplify; destruct_tac; simpl; eauto).
+    repeat (eauto; simplify; string; simpl; eauto).
 Qed.
 
 Lemma free_in_context : forall x e t Γ,
@@ -692,7 +692,7 @@ Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
                              Abs x t (close (drop x Σ) e).
 Proof.
   induction Σ; intros; simpl;
-  repeat (simplify; destruct_tac); crush.
+  repeat (simplify; string); crush.
 Qed.
 
 Lemma context_invariance : forall Γ Γ' e t,
@@ -708,7 +708,7 @@ Proof.
   try solve [econstructor; completer; crush].
 
   econstructor; completer. intros.
-  simpl in *. destruct_tac; crush.
+  simpl in *. string; crush.
 Qed.
 
 Lemma free_closed : forall x v t, (nil |-- v t) ->
@@ -730,11 +730,11 @@ Proof.
   induction e;
     intros; simpl; inversion H; subst;
     try solve[econstructor; eauto];
-    try solve[crush; destruct_tac; eauto].
+    try solve[crush; string; eauto].
 
   (* var *)
-  simpl in *. destruct_tac; crush.
-  destruct_tac.
+  simpl in *. string; crush.
+  string.
   eapply context_invariance with (Γ := nil); eauto.
   intros.
   exfalso; eauto.
@@ -742,15 +742,15 @@ Proof.
 
   (* abs *)
   simpl in *.
-  destruct_tac; eauto.
-  destruct_tac; eauto.
+  string; eauto.
+  string; eauto.
   (* <> *)
   assert (s <> x) by eauto.
   rewrite (unRR Hint0). 
   econstructor.
   completer.
   eapply context_invariance; eauto.
-  intros. simpl. destruct_tac; crush.
+  intros. simpl. string; crush.
   eauto.
 Qed.
 
@@ -778,7 +778,7 @@ Lemma fulfills_drop : forall Γ Σ,
     forall x, (drop x Γ) |= (drop x Σ).
 Proof.
   intros c e V. induction V; intros;
-                simpl; try destruct_tac; crush.
+                simpl; try string; crush.
 Qed.
 
 Lemma extend_drop : forall {T:Set}
@@ -789,9 +789,9 @@ Lemma extend_drop : forall {T:Set}
     then lookup Γ' x
     else lookup (mextend Γ' Γ) x.
 Proof.
-  intros. induction Γ; simplify; destruct_tac; 
+  intros. induction Γ; simplify; string; 
           repeat (simpl;
-                  repeat destruct_tac;
+                  repeat string;
                   iauto).
 Qed.
 
@@ -804,7 +804,7 @@ Proof.
   eapply context_invariance; eauto;
     intros;
   free_in; has_type;
-  simpl; destruct_tac; crush.
+  simpl; string; crush.
 Qed.
 
 Lemma lookup_same : forall Γ x (t:ty) (t':ty),
@@ -845,12 +845,12 @@ Lemma multi_subst : forall x v1 v2 e,
 Proof.
   intros.
   induction e; eauto; try solve[crush];
-  simpl; destruct_tac; eauto; simpl;
+  simpl; string; eauto; simpl;
   try match goal with
     |[H: closed ?v |- [_ := _]?v = ?v] =>
      rewrite sub_closed; unfold closed in H; eauto
   end;
-  destruct_tac; eauto; crush.
+  string; eauto; crush.
 Qed.
 
 Ltac closed_tac :=
@@ -870,10 +870,10 @@ Proof.
   intros.
   induction e;
     simpl;
-    repeat destruct_tac; simpl;
-    repeat destruct_tac; eauto;
+    repeat string; simpl;
+    repeat string; eauto;
     try closed_tac; eauto;
-    repeat destruct_tac; eauto;
+    repeat string; eauto;
     crush.
 Qed.
 
@@ -883,8 +883,8 @@ Lemma sub_close: forall Σ x v e,
                       close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
 Proof.
   intro Σ.
-  induction Σ; intros; simpl; repeat (simplify; destruct_tac); eauto;
-  repeat destruct_tac; simpl;
+  induction Σ; intros; simpl; repeat (simplify; string); eauto;
+  repeat string; simpl;
   try solve[rewrite multi_subst; eauto; crush];
   try solve[rewrite swap_sub; crush].
 Qed.
@@ -910,7 +910,7 @@ Proof.
   simpl.
   induction Σ; intros; eauto;
   simplify;
-  destruct_tac;
+  string;
   simpl; try rewrite swap_sub; crush.
 Qed.
 
@@ -922,7 +922,7 @@ Lemma drop_sub : forall Σ x v e,
 Proof.
   intro Σ.
   induction Σ; intros;
-  repeat destruct_tac; iauto; simplify; destruct_tac; simplify; simpl;
+  repeat string; iauto; simplify; string; simplify; simpl;
   try solve [rewrite multi_subst; crush];
   try solve [rewrite swap_sub; crush].
 Qed.
@@ -933,8 +933,8 @@ Lemma extend_drop' : forall Σ (x:string) (v:exp) e,
                        close (extend (drop x Σ) x v) e
                        = close (cons (x,v) Σ) e.
 Proof.
-  induction Σ; intros; eauto; try (simplify; destruct_tac; simplify); simpl;
-  try (simplify; destruct_tac; simplify); simpl;
+  induction Σ; intros; eauto; try (simplify; string; simplify); simpl;
+  try (simplify; string; simplify); simpl;
   [rewrite drop_sub; eauto;
    try solve [rewrite multi_subst; eauto; crush];
    crush
@@ -948,9 +948,9 @@ Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t,
 Proof.
   intros.
   simpl.
-  destruct_tac; iauto.
+  string; iauto.
   induction Γ; try solve [crush];
-  repeat (simpl; destruct_tac; iauto).
+  repeat (simpl; string; iauto).
 Qed.
 
 
@@ -1325,13 +1325,13 @@ Proof.
   - eauto.
   - eapply context_invariance. iauto.
     intros. simpl. rewrite extend_drop.
-    repeat destruct_tac.
+    repeat string.
     * simpl. crush.
     * iauto.
     * iauto.
     * unfold extend.
       rewrite <- lookup_mextend.
-      -- simpl. destruct_tac.
+      -- simpl. string.
          ** simplify.
          ** eauto.
       -- eauto.
