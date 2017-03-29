@@ -58,6 +58,23 @@ Tactic Notation "hint_rewrite" constr(E) "," constr(E1) "," constr(E2) :=
 Tactic Notation "hint_rewrite" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) :=
   hint_rewrite E; hint_rewrite E1; hint_rewrite E2; hint_rewrite E3.
 
+Ltac swap_rewrite t :=
+  match type of t with
+  | ?v1 = ?v2 => constr:(eq_sym t) 
+  | forall x : ?T, _ =>
+    (* let ret :=  *)constr:(fun x : T => let r := t x in 
+                                      ltac:(let r' := swap_rewrite r in
+                                            exact r')) (* in *)
+    (* let ret' := (eval cbv zeta in ret) in *)
+    (* constr:(ret) *)
+  end.
+
+Tactic Notation "hint_rewrite" "<-" constr(E) := 
+  let H := fresh "Hint" in
+  let E' := swap_rewrite E in
+  let t := type of E' in
+  assert (H : RR t) by (exact (rewrite_rule E')).
+
 
 Hint Extern 5 => match goal with
                 |[H : RR (_ = _) |- _] =>
@@ -95,11 +112,12 @@ Hint Extern 5 => match goal with
 
 Ltac simplify :=
   repeat (simpl in *;
-          match goal with
+          match goal with 
+          |[H: True |- _] => clear H
+          |[H: ?x <> ?x |- _] => exfalso; apply H; reflexivity
           |[|- ?P /\ ?Q] => try (solve [split; eauto 2] || (split; eauto 2; [idtac]))
           |[H: ?P /\ ?Q |- _] => invert H
           |[a: ?x * ?y |- _] => destruct a
-          |[H: True |- _] => clear H
           end).
 
 
@@ -565,7 +583,6 @@ Ltac destruct_tac :=
    end   
   |[ H : _ |- context[string_dec ?x ?y] ] =>
    destruct (string_dec x y); try subst
-  |[ a : _ * _ |- _] => destruct a
   end.
 
 Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
@@ -605,7 +622,7 @@ Lemma close_var : forall Σ x e, closed_env Σ ->
 Proof.
   hint close_closed.
   intros.
-  induction Σ; crush; repeat destruct_tac; crush.
+  induction Σ; crush; repeat (simplify; destruct_tac); crush.
 Qed.
 
 Lemma lookup_fulfill_sn : forall Γ Σ,
@@ -626,7 +643,8 @@ Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
 Proof.
   hint_rewrite string_dec_ne, string_dec_refl.
   intros.
-  induction Γ; simpl in *; repeat (eauto; destruct_tac; simpl; eauto).
+  induction Γ; 
+    repeat (eauto; simplify; destruct_tac; simpl; eauto).
 Qed.
 
 Lemma free_in_context : forall x e t Γ,
@@ -674,7 +692,7 @@ Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
                              Abs x t (close (drop x Σ) e).
 Proof.
   induction Σ; intros; simpl;
-  repeat destruct_tac; crush.
+  repeat (simplify; destruct_tac); crush.
 Qed.
 
 Lemma context_invariance : forall Γ Γ' e t,
@@ -771,7 +789,7 @@ Lemma extend_drop : forall {T:Set}
     then lookup Γ' x
     else lookup (mextend Γ' Γ) x.
 Proof.
-  intros. induction Γ; simpl in *; destruct_tac;
+  intros. induction Γ; simplify; destruct_tac; 
           repeat (simpl;
                   repeat destruct_tac;
                   iauto).
@@ -865,7 +883,7 @@ Lemma sub_close: forall Σ x v e,
                       close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
 Proof.
   intro Σ.
-  induction Σ; intros; simpl; repeat destruct_tac; eauto;
+  induction Σ; intros; simpl; repeat (simplify; destruct_tac); eauto;
   repeat destruct_tac; simpl;
   try solve[rewrite multi_subst; eauto; crush];
   try solve[rewrite swap_sub; crush].
@@ -891,9 +909,9 @@ Proof.
   generalize dependent e.
   simpl.
   induction Σ; intros; eauto;
+  simplify;
   destruct_tac;
-  simpl; destruct_tac; simpl;
-  try rewrite swap_sub; crush.
+  simpl; try rewrite swap_sub; crush.
 Qed.
 
 Lemma drop_sub : forall Σ x v e,
@@ -904,7 +922,7 @@ Lemma drop_sub : forall Σ x v e,
 Proof.
   intro Σ.
   induction Σ; intros;
-  repeat destruct_tac; iauto; simpl; destruct_tac; simpl;
+  repeat destruct_tac; iauto; simplify; destruct_tac; simplify; simpl;
   try solve [rewrite multi_subst; crush];
   try solve [rewrite swap_sub; crush].
 Qed.
@@ -915,8 +933,8 @@ Lemma extend_drop' : forall Σ (x:string) (v:exp) e,
                        close (extend (drop x Σ) x v) e
                        = close (cons (x,v) Σ) e.
 Proof.
-  induction Σ; intros; eauto; destruct_tac; simpl;
-  destruct_tac; simpl;
+  induction Σ; intros; eauto; try (simplify; destruct_tac; simplify); simpl;
+  try (simplify; destruct_tac; simplify); simpl;
   [rewrite drop_sub; eauto;
    try solve [rewrite multi_subst; eauto; crush];
    crush
@@ -1293,23 +1311,30 @@ Proof.
   rewrite close_var with (e := x0); eauto.
 Qed.
 
+
 Lemma TAbs_typing : forall Γ Σ x e t t',
                       Γ |= Σ ->
                       (extend (drop x Γ) x t) |-- e t' ->
                       nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
 Proof.
-  hint lookup_drop.
+  hint lookup_drop, fulfills_drop.
   hint_rewrite string_dec_ne, string_dec_refl.
 
   intros.
   econstructor. eapply close_preserves.
-  eapply fulfills_drop. iauto.
-  eapply context_invariance. iauto.
-  intros. simpl. rewrite extend_drop.
-  repeat destruct_tac. simpl. crush. iauto.
-  iauto. unfold extend.
-  rewrite <- lookup_mextend.
-  simpl. destruct_tac; iauto. iauto.
+  - eauto.
+  - eapply context_invariance. iauto.
+    intros. simpl. rewrite extend_drop.
+    repeat destruct_tac.
+    * simpl. crush.
+    * iauto.
+    * iauto.
+    * unfold extend.
+      rewrite <- lookup_mextend.
+      -- simpl. destruct_tac.
+         ** simplify.
+         ** eauto.
+      -- eauto.
 Qed.
 
 Lemma TAbs_app : forall x t Σ e xh,
@@ -1338,8 +1363,8 @@ Proof.
 
   assert (HH: halts s) by (hint sn_halts; eauto).
   inversion HH as [xh MS]. crush.
-  assert (SN t xh) by (eapply multistep_preserves_sn; eauto).
-  assert (closed xh) by (eapply sn_closed; eauto).
+  assert (SN t xh) by (hint multistep_preserves_sn; eauto).
+  assert (closed xh) by (hint sn_closed; eauto).
 
 
   eapply anti_reduct with (e' := close (extend (drop x Σ) x xh) e); try solve [crush]; try solve [eauto].
@@ -1357,13 +1382,6 @@ Proof.
   intros; crush.
 Qed.
 
-Ltac branch boo e ife :=
-    eapply anti_reduct with (e' := e); crush;
-    eapply multi_trans with (b := ife);
-    iauto';
-    eapply multi_context; iauto'.
-
-
 Lemma TIf_const : forall t b e1 e2 e3, SN t e2 ->
                                   SN t e3 ->
                                   nil |-- e1 Bool ->
@@ -1373,6 +1391,8 @@ Proof.
   hint sn_types.
   intros.
   destruct b.
+  (* This follows by case analysis on b, then anti-reduction, and finally we
+     have to lift evaluation to the context. *)
   - eapply anti_reduct with (e' := e2); eauto;
       eapply multi_trans with (b := (If (Const true) e2 e3));
       eauto;
@@ -1453,7 +1473,8 @@ Lemma TPair_compat : forall Γ Σ e1 e2 t1 t2,
 Proof.
   hint_rewrite close_pair.
   hint sn_typable_empty, sn_halts, TPair_halts.
-  intros; unfold SN; simplify. 
+  intros; unfold SN;
+  repeat split; eauto.
 Qed.
 
 
