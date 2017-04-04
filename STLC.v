@@ -1,113 +1,16 @@
 Require Import Coq.Unicode.Utf8 Arith FunctionalExtensionality String Coq.Program.Equality.
 
+Require Import Autosubst.Autosubst.
+
 Load CpdtTactics.
+
+Load LocalHints.
 
 Set Implicit Arguments.
 
 Ltac iauto := try solve [intuition (eauto 3)].
 Ltac iauto' := try solve [intuition eauto].
 Ltac invert H := inversion H; clear H; try subst.
-
-
-(* NOTE(dbp 2017-03-26): Often when inverting, we only want to handle
-   cases that are _not_ variables. This will fail if C is a variable
-   of type T *)
-Ltac not_var C T :=
-  match goal with
-  |[ C' : T |- _ ] =>
-   match C with
-   | C' => fail 2
-   | _ => fail 1
-   end
-  | _ => idtac
-  end.
-
-Tactic Notation "hint" constr(E) :=
-  let H := fresh "Hint" in
-  let t := type of E in
-  assert (H : t) by (exact E).
-
-Tactic Notation "hint" constr(E) "," constr(E1) := hint E; hint E1.
-Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) :=
-  hint E; hint E1; hint E2.
-Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) :=
-  hint E; hint E1; hint E2; hint E3.
-Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) "," constr(E4) :=
-  hint E; hint E1; hint E2; hint E3; hint E4.
-Tactic Notation "hint" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) "," constr(E4) "," constr(E5) :=
-  hint E; hint E1; hint E2; hint E3; hint E4; hint E5.
-
-
-Inductive RR (A : Prop) : Prop :=
-| rewrite_rule : forall a : A, RR A.
-
-Definition unRR (A : Prop) (r : RR A) :=
-  match r with
-  | rewrite_rule rr => rr
-  end.
-
-Tactic Notation "hint_rewrite" constr(E) := 
-  let H := fresh "Hint" in
-  let t := type of E in
-  assert (H : RR t) by (exact (rewrite_rule E)).
-
-Tactic Notation "hint_rewrite" constr(E) "," constr(E1) :=
-  hint_rewrite E; hint_rewrite E1.
-Tactic Notation "hint_rewrite" constr(E) "," constr(E1) "," constr(E2) :=
-  hint_rewrite E; hint_rewrite E1; hint_rewrite E2.
-Tactic Notation "hint_rewrite" constr(E) "," constr(E1) "," constr(E2) "," constr(E3) :=
-  hint_rewrite E; hint_rewrite E1; hint_rewrite E2; hint_rewrite E3.
-
-Ltac swap_rewrite t :=
-  match type of t with
-  | ?v1 = ?v2 => constr:(eq_sym t) 
-  | forall x : ?T, _ =>
-    (* let ret :=  *)constr:(fun x : T => let r := t x in 
-                                      ltac:(let r' := swap_rewrite r in
-                                            exact r')) (* in *)
-    (* let ret' := (eval cbv zeta in ret) in *)
-    (* constr:(ret) *)
-  end.
-
-Tactic Notation "hint_rewrite" "<-" constr(E) := 
-  let H := fresh "Hint" in
-  let E' := swap_rewrite E in
-  let t := type of E' in
-  assert (H : RR t) by (exact (rewrite_rule E')).
-
-
-Hint Extern 5 => match goal with
-                |[H : RR (_ = _) |- _] =>
-                 progress (rewrite (unRR H) in *)
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *)
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _ _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *)
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _ _ _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *)
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _ _ _ _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *) 
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _ _ _ _ _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *) 
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _ _ _ _ _ _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *) 
-                end.
-Hint Extern 5 => match goal with
-                |[H : RR (forall _ _ _ _ _ _ _, _ = _) |- _] =>
-                 progress (rewrite (unRR H) in *) 
-                end.
 
 
 Ltac simplify :=
@@ -120,6 +23,11 @@ Ltac simplify :=
           |[a: ?x * ?y |- _] => destruct a
           end).
 
+Definition simplify := True.
+Hint Extern 1 => match goal with
+                |[H: simplify = True |- _] => simplify
+                end.
+
 
 (**************************************)
 (************ 1. SYNTAX ***************)
@@ -130,28 +38,38 @@ Ltac simplify :=
     if, and pairs).
 *)
 
-Inductive ty  : Set :=
+Inductive ty  :=
 | Bool : ty
 | Fun : ty -> ty -> ty
 | Product : ty -> ty -> ty.
 
-Inductive exp : Set :=
-| Var : string -> exp
+Inductive exp :=
+| Var : var -> exp
 | Const : bool -> exp
-| Abs : string -> ty -> exp -> exp
+| Abs : ty -> {bind exp} -> exp
 | App : exp -> exp -> exp
 | If : exp -> exp -> exp -> exp
 | Pair : exp -> exp -> exp.
 
 Inductive value : exp -> Prop :=
 | VBool : forall b, value (Const b)
-| VAbs : forall x t e, value (Abs x t e)
+| VAbs : forall t e, value (Abs t e)
 | VPair : forall v1 v2, value v1 -> value v2 -> value (Pair v1 v2).
 
-Ltac value :=
+Ltac value_tactic :=
   match goal with
     |[H : value _ |- _] => invert H
   end.
+
+Definition value_tactic := True.
+Hint Extern 1 => match goal with
+                |[H: value_tactic = True |- _] => value_tactic
+                end.
+
+Instance Ids_exp : Ids exp. derive. Defined.
+Instance Rename_exp : Rename exp. derive. Defined.
+Instance Subst_exp : Subst exp. derive. Defined.
+Instance SubstLemmas_exp : SubstLemmas exp. derive. Qed.
 
 (**************************************)
 (**** 2. SUBSTITUTION/ENVIRONMENTS ****)
@@ -165,91 +83,118 @@ Ltac value :=
     as lists, _not_ as functions as is sometimes done.
 *)
 
-Definition tyenv := list (string * ty).
+Lemma l : forall (A:Type) n x (T : list A), S n < length (x::T) -> n < length T.
+Proof.
+  intros.
+  simpl in H.
+  Lemma lt_S : forall n n', S n < S n' -> n < n'.
+  Proof.
+    intros. omega.
+  Qed.
+  hint lt_S; eauto.
+Qed.
 
-Definition venv := list (string * exp).
+Lemma f : forall (A:Type) n, n < length (@nil A) -> False.
+Proof.
+  intros.
+  simpl in H.
+  omega.
+Qed.
 
-Definition extend {T : Set} (G : list (string * T)) (x:string) (t : T) : list (string * T) :=
-  cons (x,t) G.
-
-Fixpoint mextend  {T : Set} (e : list (string * T)) (G : list (string * T)) {struct G} : list (string * T) :=
-  match G with
-    | nil => e
-    | cons (x,v) G' => extend (mextend e G') x v
+Fixpoint get {T} (Gamma : list T) (n : var) : (n < length Gamma) -> T :=
+  match n, Gamma with
+  | O, x::_ => fun _ => x
+  | S n', _::Gamma' => fun p => get Gamma' (l p)
+  | _, nil => fun p => match (f p) with end
   end.
+Arguments get {T} Gamma n p.
 
-Fixpoint lookup {T : Set}
-                (E : list (string * T))
-                (x:string) : option T :=
-  match E with
-    |cons (y,t) rest => if string_dec y x then Some t else lookup rest x
-    |nil => None
-  end.
 
-Fixpoint drop {T : Set}
-         (x:string)
-         (E : list (string * T)) : list (string * T) :=
-  match E with
-    | nil => nil
-    | cons (y,t) rest => if string_dec x y then drop x rest else cons (y,t) (drop x rest)
-  end.
+(* Definition tyenv := list ty. *)
 
-Fixpoint sub (x:string) (e:exp) (e':exp) : exp :=
-  match e with
-    | Var y => if string_dec y x then e' else e
-    | Const b => e
-    | Abs y t body => if string_dec y x
-                     then e
-                     else Abs y t (sub x body e')
-    | App e1 e2 => App (sub x e1 e') (sub x e2 e')
-    | If ec e1 e2 => If (sub x ec e')
-                       (sub x e1 e')
-                       (sub x e2 e')
-    | Pair e1 e2 => Pair (sub x e1 e') (sub x e2 e')
-    end.
+(* Definition venv := list exp. *)
 
-Notation "'[' x ':=' s ']' t" := (sub x t s) (at level 20).
+(* Definition extend {T : Set} (G : list (string * T)) (x:string) (t : T) : list (string * T) := *)
+(*   cons (x,t) G. *)
 
-Inductive free_in : string -> exp -> Prop :=
-| free_var : forall x, free_in x (Var x)
-| free_abs : forall x t y e, free_in x e ->
-                      x <> y ->
-                      free_in x (Abs y t e)
-| free_app1 : forall x e1 e2, free_in x e1 ->
-                         free_in x (App e1 e2)
-| free_app2 : forall x e1 e2, free_in x e2 ->
-                         free_in x (App e1 e2)
-| free_if1 : forall x e1 e2 e3, free_in x e1 ->
-                           free_in x (If e1 e2 e3)
-| free_if2 : forall x e1 e2 e3, free_in x e2 ->
-                           free_in x (If e1 e2 e3)
-| free_if3 : forall x e1 e2 e3, free_in x e3 ->
-                           free_in x (If e1 e2 e3)
-| free_pair1 : forall x e1 e2, free_in x e1 ->
-                          free_in x (Pair e1 e2)
-| free_pair2 : forall x e1 e2, free_in x e2 ->
-                          free_in x (Pair e1 e2).
+(* Fixpoint mextend  {T : Set} (e : list (string * T)) (G : list (string * T)) {struct G} : list (string * T) := *)
+(*   match G with *)
+(*     | nil => e *)
+(*     | cons (x,v) G' => extend (mextend e G') x v *)
+(*   end. *)
 
-Hint Constructors free_in.
+(* Fixpoint lookup {T : Set} *)
+(*                 (E : list (string * T)) *)
+(*                 (x:string) : option T := *)
+(*   match E with *)
+(*     |cons (y,t) rest => if string_dec y x then Some t else lookup rest x *)
+(*     |nil => None *)
+(*   end. *)
 
-Ltac free_in :=
-  match goal with
-    |[H : free_in _ _ |- _] => invert H
-  end.
+(* Fixpoint drop {T : Set} *)
+(*          (x:string) *)
+(*          (E : list (string * T)) : list (string * T) := *)
+(*   match E with *)
+(*     | nil => nil *)
+(*     | cons (y,t) rest => if string_dec x y then drop x rest else cons (y,t) (drop x rest) *)
+(*   end. *)
 
-Definition closed t := forall x, ~ free_in x t.
+(* Fixpoint sub (x:string) (e:exp) (e':exp) : exp := *)
+(*   match e with *)
+(*     | Var y => if string_dec y x then e' else e *)
+(*     | Const b => e *)
+(*     | Abs y t body => if string_dec y x *)
+(*                      then e *)
+(*                      else Abs y t (sub x body e') *)
+(*     | App e1 e2 => App (sub x e1 e') (sub x e2 e') *)
+(*     | If ec e1 e2 => If (sub x ec e') *)
+(*                        (sub x e1 e') *)
+(*                        (sub x e2 e') *)
+(*     | Pair e1 e2 => Pair (sub x e1 e') (sub x e2 e') *)
+(*     end. *)
 
-Fixpoint closed_env (e:venv) :=
-  match e with
-    | nil => True
-    | cons (_,e1) en => closed e1 /\ closed_env en
-  end.
+(* Notation "'[' x ':=' s ']' t" := (sub x t s) (at level 20). *)
 
-Fixpoint close (Σ : venv) (e : exp) : exp :=
-  match Σ with
-    |nil => e
-    |cons (x,v) Σ' => close Σ' ([x:=v]e)
-  end.
+(* Inductive free_in : string -> exp -> Prop := *)
+(* | free_var : forall x, free_in x (Var x) *)
+(* | free_abs : forall x t y e, free_in x e -> *)
+(*                       x <> y -> *)
+(*                       free_in x (Abs y t e) *)
+(* | free_app1 : forall x e1 e2, free_in x e1 -> *)
+(*                          free_in x (App e1 e2) *)
+(* | free_app2 : forall x e1 e2, free_in x e2 -> *)
+(*                          free_in x (App e1 e2) *)
+(* | free_if1 : forall x e1 e2 e3, free_in x e1 -> *)
+(*                            free_in x (If e1 e2 e3) *)
+(* | free_if2 : forall x e1 e2 e3, free_in x e2 -> *)
+(*                            free_in x (If e1 e2 e3) *)
+(* | free_if3 : forall x e1 e2 e3, free_in x e3 -> *)
+(*                            free_in x (If e1 e2 e3) *)
+(* | free_pair1 : forall x e1 e2, free_in x e1 -> *)
+(*                           free_in x (Pair e1 e2) *)
+(* | free_pair2 : forall x e1 e2, free_in x e2 -> *)
+(*                           free_in x (Pair e1 e2). *)
+
+(* Hint Constructors free_in. *)
+
+(* Ltac free_in := *)
+(*   match goal with *)
+(*     |[H : free_in _ _ |- _] => invert H *)
+(*   end. *)
+
+(* Definition closed t := forall x, ~ free_in x t. *)
+
+(* Fixpoint closed_env (e:venv) := *)
+(*   match e with *)
+(*     | nil => True *)
+(*     | cons (_,e1) en => closed e1 /\ closed_env en *)
+(*   end. *)
+
+(* Fixpoint close (Σ : venv) (e : exp) : exp := *)
+(*   match Σ with *)
+(*     |nil => e *)
+(*     |cons (x,v) Σ' => close Σ' ([x:=v]e) *)
+(*   end. *)
 
 
 (**************************************)
@@ -259,13 +204,15 @@ Fixpoint close (Σ : venv) (e : exp) : exp :=
 (** This section contains the main typing judgement.
 *)
 
-Reserved Notation "Γ '|--' e" (at level 10).
+Reserved Notation "Γ '||-' e" (at level 10).
 
-Inductive has_type : tyenv -> exp -> ty -> Prop :=
+Inductive has_type : list ty -> exp -> ty -> Prop :=
 | TConst : forall Γ b, has_type Γ (Const b) Bool
-| TVar : forall Γ x t, lookup Γ x = Some t -> has_type Γ (Var x) t
-| TAbs : forall Γ x e t t', has_type (extend (drop x Γ) x t) e t' ->
-                       has_type Γ (Abs x t e) (Fun t t')
+| TVar : forall Γ x t, forall p : (x < length Γ),
+      get Γ x p = t ->
+      has_type Γ (Var x) t
+| TAbs : forall Γ e t t', has_type (t :: Γ) e t' ->
+                     has_type Γ (Abs t e) (Fun t t')
 | TApp : forall Γ e e' t1 t2, has_type Γ e (Fun t1 t2) ->
                          has_type Γ e' t1 ->
                          has_type Γ (App e e') t2
@@ -277,15 +224,20 @@ Inductive has_type : tyenv -> exp -> ty -> Prop :=
                            has_type Γ e2 t2 ->
                            has_type Γ (Pair e1 e2)
                                       (Product t1 t2)
-where "Γ '|--' e" := (has_type Γ e).
+where "Γ '||-' e" := (has_type Γ e).
 
 Hint Constructors has_type ty exp value.
 
-Ltac has_type := 
+Ltac has_type_tactic := 
   match goal with
-  |[H : _ |-- ?E ?T |- _ ] =>
+  |[H : _ ||- ?E ?T |- _ ] =>
    not_var E exp; invert H
   end.
+
+Definition has_type_tactic := True.
+Hint Extern 1 => match goal with
+                |[H: has_type_tactic = True |- _] => has_type_tactic
+                end.
 
 
 (**************************************)
@@ -296,7 +248,7 @@ Ltac has_type :=
     the language, which is based on evaluation contexts.
 *)
 
-Inductive context : Set :=
+Inductive context :=
 | CHole : context
 | CApp1 : context -> exp -> context
 | CApp2 : exp -> context -> context
@@ -330,8 +282,8 @@ Ltac plug := let c := constr:(context) in
              end.
 
 Inductive step_prim : exp -> exp -> Prop :=
-| SBeta : forall x t e v, value v -> step_prim (App (Abs x t e) v)
-                                         ([x:=v]e)
+| SBeta : forall t e v e', value v -> e.[v/] = e' ->
+                      step_prim (App (Abs t e) v) e'
 | SIfTrue : forall e1 e2, step_prim (If (Const true) e1 e2) e1
 | SIfFalse : forall e1 e2, step_prim (If (Const false) e1 e2) e2.
 
@@ -393,7 +345,7 @@ Ltac halts :=
   end.
 
 Fixpoint SN (T : ty) (t : exp) : Prop :=
-  (nil |-- t T) /\ halts t /\
+  (nil ||- t T) /\ halts t /\
   (match T with
      | Bool => True
      | Fun T1 T2 => forall s, SN T1 s -> SN T2 (App t s)
@@ -402,12 +354,12 @@ Fixpoint SN (T : ty) (t : exp) : Prop :=
 
 Reserved Notation "Γ '|=' Σ" (at level 40).
 
-Inductive fulfills : tyenv -> venv -> Prop :=
-| FNil : fulfills nil nil
-| FCons : forall x t e Γ Σ,
+Inductive fulfills : list ty -> (var -> exp) -> Prop :=
+| FNil : fulfills nil ids
+| FCons : forall t e Γ Σ,
             SN t e ->
             fulfills Γ Σ ->
-            fulfills (cons (x,t) Γ) (cons (x,e) Σ)
+            fulfills (t :: Γ) (e .: Σ)
 where "Γ '|=' Σ" := (fulfills Γ Σ).
 
 Hint Constructors fulfills.
@@ -534,10 +486,9 @@ Qed.
 
 
 
-Lemma close_const : forall Σ b, close Σ (Const b) = (Const b).
+Lemma close_const : forall Σ b, (Const b).[Σ] = (Const b).
 Proof.
-  intros.
-  induction Σ; eauto; simpl in *; simplify; eauto.
+  autosubst.
 Qed.
 
 Lemma halts_value : forall v, value v -> halts v.
@@ -553,208 +504,208 @@ Proof.
   eauto.
 Qed.
 
-Lemma string_dec_refl : forall T s (t:T) (f:T), (if string_dec s s then t else f) = t.
-Proof.
-  intros.
-  destruct (string_dec s s).
-  - eauto.
-  - exfalso; eauto.
-Qed.
+(* Lemma string_dec_refl : forall T s (t:T) (f:T), (if string_dec s s then t else f) = t. *)
+(* Proof. *)
+(*   intros. *)
+(*   destruct (string_dec s s). *)
+(*   - eauto. *)
+(*   - exfalso; eauto. *)
+(* Qed. *)
 
-Lemma string_dec_ne : forall T s s' (t:T) (f:T), s <> s' -> (if string_dec s s' then t else f) = f.
-Proof.
-  intros.
-  destruct (string_dec s s').
-  - subst. contradiction H. eauto.
-  - reflexivity.
-Qed.
+(* Lemma string_dec_ne : forall T s s' (t:T) (f:T), s <> s' -> (if string_dec s s' then t else f) = f. *)
+(* Proof. *)
+(*   intros. *)
+(*   destruct (string_dec s s'). *)
+(*   - subst. contradiction H. eauto. *)
+(*   - reflexivity. *)
+(* Qed. *)
 
-Ltac string :=
-  match goal with
-  |[ H : context[string_dec ?x ?y] |- _ ] =>
-   match goal with
-     [x : string, y : string |- _] =>
-     destruct (string_dec x y); try subst
-   end
-  |[ H : context[string_dec ?x ?x] |- _ ] =>
-   match goal with
-     [x : string |- _] =>
-     destruct (string_dec x x); try subst
-   end   
-  |[ H : _ |- context[string_dec ?x ?y] ] =>
-   destruct (string_dec x y); try subst
-  end.
+(* Ltac string := *)
+(*   match goal with *)
+(*   |[ H : context[string_dec ?x ?y] |- _ ] => *)
+(*    match goal with *)
+(*      [x : string, y : string |- _] => *)
+(*      destruct (string_dec x y); try subst *)
+(*    end *)
+(*   |[ H : context[string_dec ?x ?x] |- _ ] => *)
+(*    match goal with *)
+(*      [x : string |- _] => *)
+(*      destruct (string_dec x x); try subst *)
+(*    end    *)
+(*   |[ H : _ |- context[string_dec ?x ?y] ] => *)
+(*    destruct (string_dec x y); try subst *)
+(*   end. *)
 
-Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:venv),
-                           Γ |= Σ ->
-                           forall x (t:ty),
-                             lookup Γ x = Some t ->
-                             exists v, lookup Σ x = Some v.
-Proof.
-  intros Γ Σ H.
-  induction H; intros;
-    simpl in *; eauto;
-  crush;
-  string; eauto.
-Qed.
+(* Lemma lookup_fulfill_v : forall (Γ:tyenv) (Σ:var -> exp), *)
+(*                            Γ |= Σ -> *)
+(*                            forall x (t:ty), *)
+(*                              nth_error Γ x = Some t -> *)
+(*                              exists v, Σ x = v. *)
+(* Proof. *)
+(*   intros Γ Σ H. *)
+(*   induction H; intros; *)
+(*     simpl in *; eauto; *)
+(*   crush; *)
+(*   string; eauto. *)
+(* Qed. *)
 
 
-Lemma sub_closed : forall x e, ~ free_in x e ->
-                          forall e', [x:=e']e = e.
-Proof.
-  intros.
-  induction e; simpl;
-  try solve [intuition (eauto; crush)];
-  string; crush.
-Qed.
+(* Lemma sub_closed : forall x e, ~ free_in x e -> *)
+(*                           forall e', [x:=e']e = e. *)
+(* Proof. *)
+(*   intros. *)
+(*   induction e; simpl; *)
+(*   try solve [intuition (eauto; crush)]; *)
+(*   string; crush. *)
+(* Qed. *)
 
-Lemma close_closed : forall Σ e, closed e -> close Σ e = e.
-Proof.
-  hint_rewrite sub_closed.
-  unfold closed in *;
-  intro Σ.
-  induction Σ; crush; eauto.
-Qed.
+(* Lemma close_closed : forall Σ e, closed e -> close Σ e = e. *)
+(* Proof. *)
+(*   hint_rewrite sub_closed. *)
+(*   unfold closed in *; *)
+(*   intro Σ. *)
+(*   induction Σ; crush; eauto. *)
+(* Qed. *)
 
-Lemma close_var : forall Σ x e, closed_env Σ ->
-                           lookup Σ x = Some e ->
-                           close Σ (Var x) = e.
-Proof.
-  hint close_closed.
-  intros.
-  induction Σ; crush; repeat (simplify; string); crush.
-Qed.
+(* Lemma close_var : forall Σ x e, closed_env Σ -> *)
+(*                            lookup Σ x = Some e -> *)
+(*                            close Σ (Var x) = e. *)
+(* Proof. *)
+(*   hint close_closed. *)
+(*   intros. *)
+(*   induction Σ; crush; repeat (simplify; string); crush. *)
+(* Qed. *)
 
-Lemma lookup_fulfill_sn : forall Γ Σ,
-                            Γ |= Σ ->
-                            forall t x v,
-                              lookup Γ x = Some t ->
-                              lookup Σ x = Some v ->
-                              SN t v.
-Proof.
-  intros Γ Σ H.
-  induction H; intros; [crush|idtac].
-  simpl in *; string; eauto; crush.
-Qed.
+(* Lemma lookup_fulfill_sn : forall Γ Σ, *)
+(*                             Γ |= Σ -> *)
+(*                             forall t x v, *)
+(*                               lookup Γ x = Some t -> *)
+(*                               lookup Σ x = Some v -> *)
+(*                               SN t v. *)
+(* Proof. *)
+(*   intros Γ Σ H. *)
+(*   induction H; intros; [crush|idtac]. *)
+(*   simpl in *; string; eauto; crush. *)
+(* Qed. *)
 
-Lemma lookup_drop : forall (Γ : list (string * ty)) x y,
-                      x <> y ->
-                      lookup (drop x Γ) y = lookup Γ y.
-Proof.
-  hint_rewrite string_dec_ne, string_dec_refl.
-  intros.
-  induction Γ; 
-    repeat (eauto; simplify; string; simpl; eauto).
-Qed.
+(* Lemma lookup_drop : forall (Γ : list (string * ty)) x y, *)
+(*                       x <> y -> *)
+(*                       lookup (drop x Γ) y = lookup Γ y. *)
+(* Proof. *)
+(*   hint_rewrite string_dec_ne, string_dec_refl. *)
+(*   intros. *)
+(*   induction Γ;  *)
+(*     repeat (eauto; simplify; string; simpl; eauto). *)
+(* Qed. *)
 
-Lemma free_in_context : forall x e t Γ,
-                          free_in x e ->
-                          Γ |-- e t ->
-                              exists t', lookup Γ x = Some t'.
-Proof.
-  hint_rewrite string_dec_ne, string_dec_refl.
+(* Lemma free_in_context : forall x e t Γ, *)
+(*                           free_in x e -> *)
+(*                           Γ ||- e t -> *)
+(*                               exists t', lookup Γ x = Some t'. *)
+(* Proof. *)
+(*   hint_rewrite string_dec_ne, string_dec_refl. *)
 
-  intros.
-  induction H0; free_in; crush; eauto.
+(*   intros. *)
+(*   induction H0; free_in; crush; eauto. *)
 
-  rewrite lookup_drop in *; eauto.
-Qed.
+(*   rewrite lookup_drop in *; eauto. *)
+(* Qed. *)
 
-Lemma typable_empty_closed : forall e t, nil |-- e t -> closed e.
-Proof.
-  unfold closed. unfold not. intros.
-  destruct (free_in_context H0 H). crush.
-Qed.
+(* Lemma typable_empty_closed : forall e t, nil ||- e t -> closed e. *)
+(* Proof. *)
+(*   unfold closed. unfold not. intros. *)
+(*   destruct (free_in_context H0 H). crush. *)
+(* Qed. *)
 
-Lemma sn_typable_empty : forall e t, SN t e -> nil |-- e t.
+Lemma sn_typable_empty : forall e t, SN t e -> nil ||- e t.
 Proof.
   intros.
   destruct t; crush.
 Qed.
 
-Lemma sn_closed : forall t e, SN t e -> closed e.
-Proof.
-  hint typable_empty_closed, sn_typable_empty.
-  intros. eauto.
-Qed.
+(* Lemma sn_closed : forall t e, SN t e -> closed e. *)
+(* Proof. *)
+(*   hint typable_empty_closed, sn_typable_empty. *)
+(*   intros. eauto. *)
+(* Qed. *)
 
-Lemma fulfill_closed : forall Γ Σ, Γ |= Σ -> closed_env Σ.
-Proof.
-  hint typable_empty_closed, sn_typable_empty.
+(* Lemma fulfill_closed : forall Γ Σ, Γ |= Σ -> closed_env Σ. *)
+(* Proof. *)
+(*   hint typable_empty_closed, sn_typable_empty. *)
   
-  intros.
-  induction H; simpl; eauto.
-Qed.
+(*   intros. *)
+(*   induction H; simpl; eauto. *)
+(* Qed. *)
 
 
 
-Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) =
-                             Abs x t (close (drop x Σ) e).
-Proof.
-  induction Σ; intros; simpl;
-  repeat (simplify; string); crush.
-Qed.
+(* Lemma close_abs : forall Σ x t e, close Σ (Abs x t e) = *)
+(*                              Abs x t (close (drop x Σ) e). *)
+(* Proof. *)
+(*   induction Σ; intros; simpl; *)
+(*   repeat (simplify; string); crush. *)
+(* Qed. *)
 
-Lemma context_invariance : forall Γ Γ' e t,
-     Γ |-- e t  ->
-     (forall x, free_in x e -> lookup Γ x = lookup Γ' x)  ->
-     Γ' |-- e t.
-Proof.
-  hint_rewrite lookup_drop.
+(* Lemma context_invariance : forall Γ Γ' e t, *)
+(*      Γ ||- e t  -> *)
+(*      (forall x, free_in x e -> lookup Γ x = lookup Γ' x)  -> *)
+(*      Γ' ||- e t. *)
+(* Proof. *)
+(*   hint_rewrite lookup_drop. *)
 
-  intros.
-  generalize dependent Γ'.
-  induction H; intros; crush;
-  try solve [econstructor; completer; crush].
+(*   intros. *)
+(*   generalize dependent Γ'. *)
+(*   induction H; intros; crush; *)
+(*   try solve [econstructor; completer; crush]. *)
 
-  econstructor; completer. intros.
-  simpl in *. string; crush.
-Qed.
+(*   econstructor; completer. intros. *)
+(*   simpl in *. string; crush. *)
+(* Qed. *)
 
-Lemma free_closed : forall x v t, (nil |-- v t) ->
-                             free_in x v -> False.
-Proof.
-  intros; destruct (free_in_context H0 H); crush.
-Qed.
+(* Lemma free_closed : forall x v t, (nil ||- v t) -> *)
+(*                              free_in x v -> False. *)
+(* Proof. *)
+(*   intros; destruct (free_in_context H0 H); crush. *)
+(* Qed. *)
 
-Lemma substitution_preserves_typing : forall Γ x t v e t',
-     (extend Γ x t') |-- e t  ->
-     nil |-- v t'   ->
-     Γ |-- ([x:=v]e) t.
-Proof.
-  hint free_closed.
-  hint_rewrite string_dec_ne, string_dec_refl.
-  intros.
-  generalize dependent Γ.
-  generalize dependent t.
-  induction e;
-    intros; simpl; inversion H; subst;
-    try solve[econstructor; eauto];
-    try solve[crush; string; eauto].
+(* Lemma substitution_preserves_typing : forall Γ x t v e t', *)
+(*      (extend Γ x t') ||- e t  -> *)
+(*      nil ||- v t'   -> *)
+(*      Γ ||- ([x:=v]e) t. *)
+(* Proof. *)
+(*   hint free_closed. *)
+(*   hint_rewrite string_dec_ne, string_dec_refl. *)
+(*   intros. *)
+(*   generalize dependent Γ. *)
+(*   generalize dependent t. *)
+(*   induction e; *)
+(*     intros; simpl; inversion H; subst; *)
+(*     try solve[econstructor; eauto]; *)
+(*     try solve[crush; string; eauto]. *)
 
-  (* var *)
-  simpl in *. string; crush.
-  string.
-  eapply context_invariance with (Γ := nil); eauto.
-  intros.
-  exfalso; eauto.
-  exfalso; eauto.
+(*   (* var *) *)
+(*   simpl in *. string; crush. *)
+(*   string. *)
+(*   eapply context_invariance with (Γ := nil); eauto. *)
+(*   intros. *)
+(*   exfalso; eauto. *)
+(*   exfalso; eauto. *)
 
-  (* abs *)
-  simpl in *.
-  string; eauto.
-  string; eauto.
-  (* <> *)
-  assert (s <> x) by eauto.
-  rewrite (unRR Hint0). 
-  econstructor.
-  completer.
-  eapply context_invariance; eauto.
-  intros. simpl. string; crush.
-  eauto.
-Qed.
+(*   (* abs *) *)
+(*   simpl in *. *)
+(*   string; eauto. *)
+(*   string; eauto. *)
+(*   (* <> *) *)
+(*   assert (s <> x) by eauto. *)
+(*   rewrite (unRR Hint0).  *)
+(*   econstructor. *)
+(*   completer. *)
+(*   eapply context_invariance; eauto. *)
+(*   intros. simpl. string; crush. *)
+(*   eauto. *)
+(* Qed. *)
 
-Lemma sn_types : forall t e, SN t e -> nil |-- e t.
+Lemma sn_types : forall t e, SN t e -> nil ||- e t.
 Proof.
   hint sn_typable_empty.
 
@@ -763,229 +714,229 @@ Proof.
 Qed.
 
 
-Lemma close_preserves : forall Γ Σ, Γ |= Σ ->
-                        forall G e t,
-                          (mextend G Γ) |-- e t ->
-                          G |-- (close Σ e) t.
-Proof.
-  hint sn_typable_empty, substitution_preserves_typing.
-  induction 1; intros;
-  simpl in *; eauto.
-Qed.
+(* Lemma close_preserves : forall Γ Σ, Γ |= Σ -> *)
+(*                         forall G e t, *)
+(*                           (mextend G Γ) ||- e t -> *)
+(*                           G ||- (close Σ e) t. *)
+(* Proof. *)
+(*   hint sn_typable_empty, substitution_preserves_typing. *)
+(*   induction 1; intros; *)
+(*   simpl in *; eauto. *)
+(* Qed. *)
 
-Lemma fulfills_drop : forall Γ Σ,
-    Γ |= Σ ->
-    forall x, (drop x Γ) |= (drop x Σ).
-Proof.
-  intros c e V. induction V; intros;
-                simpl; try string; crush.
-Qed.
+(* Lemma fulfills_drop : forall Γ Σ, *)
+(*     Γ |= Σ -> *)
+(*     forall x, (drop x Γ) |= (drop x Σ). *)
+(* Proof. *)
+(*   intros c e V. induction V; intros; *)
+(*                 simpl; try string; crush. *)
+(* Qed. *)
 
-Lemma extend_drop : forall {T:Set}
-                      (Γ : list (string * T))
-                      (Γ' : list (string * T)) x x',
-  lookup (mextend Γ' (drop x' Γ)) x
-  = if string_dec x x'
-    then lookup Γ' x
-    else lookup (mextend Γ' Γ) x.
-Proof.
-  intros. induction Γ; simplify; string; 
-          repeat (simpl;
-                  repeat string;
-                  iauto).
-Qed.
+(* Lemma extend_drop : forall {T:Set} *)
+(*                       (Γ : list (string * T)) *)
+(*                       (Γ' : list (string * T)) x x', *)
+(*   lookup (mextend Γ' (drop x' Γ)) x *)
+(*   = if string_dec x x' *)
+(*     then lookup Γ' x *)
+(*     else lookup (mextend Γ' Γ) x. *)
+(* Proof. *)
+(*   intros. induction Γ; simplify; string;  *)
+(*           repeat (simpl; *)
+(*                   repeat string; *)
+(*                   iauto). *)
+(* Qed. *)
 
-Lemma extend_drop'' : forall Γ x t t' e,
-                        (extend (drop x Γ) x t) |-- e t' ->
-                        (extend Γ x t) |-- e t'.
-Proof.
-  hint lookup_drop.
-  intros.
-  eapply context_invariance; eauto;
-    intros;
-  free_in; has_type;
-  simpl; string; crush.
-Qed.
+(* Lemma extend_drop'' : forall Γ x t t' e, *)
+(*                         (extend (drop x Γ) x t) ||- e t' -> *)
+(*                         (extend Γ x t) ||- e t'. *)
+(* Proof. *)
+(*   hint lookup_drop. *)
+(*   intros. *)
+(*   eapply context_invariance; eauto; *)
+(*     intros; *)
+(*   free_in; has_type; *)
+(*   simpl; string; crush. *)
+(* Qed. *)
 
-Lemma lookup_same : forall Γ x (t:ty) (t':ty),
-                      lookup x Γ = Some t ->
-                      lookup x Γ = Some t' ->
-                      t = t'.
-Proof.
-  intros. rewrite H in H0. crush.
-Qed.
+(* Lemma lookup_same : forall Γ x (t:ty) (t':ty), *)
+(*                       lookup x Γ = Some t -> *)
+(*                       lookup x Γ = Some t' -> *)
+(*                       t = t'. *)
+(* Proof. *)
+(*   intros. rewrite H in H0. crush. *)
+(* Qed. *)
 
-Lemma typed_hole : forall C e e' t,
-                     nil |-- e t ->
-                     plug C e' e ->
-                     exists t', nil |-- e' t'.
-Proof.
-  intros.
-  generalize dependent t.
-  induction H0; intros;
-  match goal with
-  |[H : _ |-- _ _ |- _] => invert H
-  end;
-  eauto.
-Qed.
-
-
-
-Lemma plug_values : forall e v C, plug C e v ->
-                             value v ->
-                             value e.
-Proof.
-  intros e v C P H.
-  induction P; value; eauto.
-Qed.
-
-Lemma multi_subst : forall x v1 v2 e,
-                      closed v1 -> closed v2 ->
-                      [x:=v1]([x:=v2]e) = [x:=v2]e.
-Proof.
-  intros.
-  induction e; eauto; try solve[crush];
-  simpl; string; eauto; simpl;
-  try match goal with
-    |[H: closed ?v |- [_ := _]?v = ?v] =>
-     rewrite sub_closed; unfold closed in H; eauto
-  end;
-  string; eauto; crush.
-Qed.
-
-Ltac closed_tac :=
-  match goal with
-    |[H: closed ?v |- [_ := _]?v = ?v] =>
-     rewrite sub_closed; unfold closed in H; eauto
-    |[H: closed ?v |- ?v = [_ := _]?v] =>
-     rewrite sub_closed; unfold closed in H; eauto
-  end.
-
-Lemma swap_sub : forall x1 x2 v1 v2 e,
-                   x1 <> x2 ->
-                   closed v1 ->
-                   closed v2 ->
-                   [x1:=v1]([x2:=v2]e) = [x2:=v2]([x1:=v1]e).
-Proof.
-  intros.
-  induction e;
-    simpl;
-    repeat string; simpl;
-    repeat string; eauto;
-    try closed_tac; eauto;
-    repeat string; eauto;
-    crush.
-Qed.
-
-Lemma sub_close: forall Σ x v e,
-                      closed v ->
-                      closed_env Σ ->
-                      close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e).
-Proof.
-  intro Σ.
-  induction Σ; intros; simpl; repeat (simplify; string); eauto;
-  repeat string; simpl;
-  try solve[rewrite multi_subst; eauto; crush];
-  try solve[rewrite swap_sub; crush].
-Qed.
-
-Lemma multistep_App2 : forall v e e',
-                         value v ->
-                         multi step e e' ->
-                         multi step (App v e) (App v e').
-Proof.
-  intros.
-  eapply multi_context with (e1 := e) (e2 := e'); eauto.
-Qed.
-
-Lemma sub_close_extend :
-  forall x v e Σ,
-    closed v ->
-    closed_env Σ ->
-    [x:=v](close (drop x Σ) e) =
-    close (extend (drop x Σ) x v) e.
-Proof.
-  intros.
-  generalize dependent e.
-  simpl.
-  induction Σ; intros; eauto;
-  simplify;
-  string;
-  simpl; try rewrite swap_sub; crush.
-Qed.
-
-Lemma drop_sub : forall Σ x v e,
-                   closed v ->
-                   closed_env Σ ->
-                   close (drop x Σ) ([x:=v]e) =
-                   close Σ ([x:=v]e).
-Proof.
-  intro Σ.
-  induction Σ; intros;
-  repeat string; iauto; simplify; string; simplify; simpl;
-  try solve [rewrite multi_subst; crush];
-  try solve [rewrite swap_sub; crush].
-Qed.
-
-Lemma extend_drop' : forall Σ (x:string) (v:exp) e,
-                       closed_env Σ ->
-                       closed v ->
-                       close (extend (drop x Σ) x v) e
-                       = close (cons (x,v) Σ) e.
-Proof.
-  induction Σ; intros; eauto; try (simplify; string; simplify); simpl;
-  try (simplify; string; simplify); simpl;
-  [rewrite drop_sub; eauto;
-   try solve [rewrite multi_subst; eauto; crush];
-   crush
-  |rewrite swap_sub; crush].
-Qed.
-
-Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t,
-                        x <> x0 ->
-                        lookup ((x, t) :: Γ) x0 =
-                        lookup (mextend (cons (x, t) nil) Γ) x0.
-Proof.
-  intros.
-  simpl.
-  string; iauto.
-  induction Γ; try solve [crush];
-  repeat (simpl; string; iauto).
-Qed.
+(* Lemma typed_hole : forall C e e' t, *)
+(*                      nil ||- e t -> *)
+(*                      plug C e' e -> *)
+(*                      exists t', nil ||- e' t'. *)
+(* Proof. *)
+(*   intros. *)
+(*   generalize dependent t. *)
+(*   induction H0; intros; *)
+(*   match goal with *)
+(*   |[H : _ ||- _ _ |- _] => invert H *)
+(*   end; *)
+(*   eauto. *)
+(* Qed. *)
 
 
-Lemma close_app : forall Σ e1 e2,
-                    close Σ (App e1 e2) =
-                    App (close Σ e1) (close Σ e2).
-Proof.
-  intro Σ.
-  induction Σ; simpl; intuition.
-Qed.
 
-Lemma close_if : forall Σ e1 e2 e3,
-                    close Σ (If e1 e2 e3) =
-                    If (close Σ e1) (close Σ e2) (close Σ e3).
-Proof.
-  intro Σ.
-  induction Σ; simpl; intuition.
-Qed.
+(* Lemma plug_values : forall e v C, plug C e v -> *)
+(*                              value v -> *)
+(*                              value e. *)
+(* Proof. *)
+(*   intros e v C P H. *)
+(*   induction P; value; eauto. *)
+(* Qed. *)
 
-Lemma drop_fulfills : forall Γ Σ x,
-                        Γ |= Σ ->
-                        drop x Γ |= drop x Σ.
-Proof.
-  hint fulfills_drop.
-  intros.
-  induction H; eauto.
-Qed.
+(* Lemma multi_subst : forall x v1 v2 e, *)
+(*                       closed v1 -> closed v2 -> *)
+(*                       [x:=v1]([x:=v2]e) = [x:=v2]e. *)
+(* Proof. *)
+(*   intros. *)
+(*   induction e; eauto; try solve[crush]; *)
+(*   simpl; string; eauto; simpl; *)
+(*   try match goal with *)
+(*     |[H: closed ?v |- [_ := _]?v = ?v] => *)
+(*      rewrite sub_closed; unfold closed in H; eauto *)
+(*   end; *)
+(*   string; eauto; crush. *)
+(* Qed. *)
 
-Lemma close_pair : forall Σ e1 e2,
-                    close Σ (Pair e1 e2) =
-                    Pair (close Σ e1) (close Σ e2).
-Proof.
-  intro Σ.
-  induction Σ; simpl; intuition.
-Qed.
+(* Ltac closed_tac := *)
+(*   match goal with *)
+(*     |[H: closed ?v |- [_ := _]?v = ?v] => *)
+(*      rewrite sub_closed; unfold closed in H; eauto *)
+(*     |[H: closed ?v |- ?v = [_ := _]?v] => *)
+(*      rewrite sub_closed; unfold closed in H; eauto *)
+(*   end. *)
+
+(* Lemma swap_sub : forall x1 x2 v1 v2 e, *)
+(*                    x1 <> x2 -> *)
+(*                    closed v1 -> *)
+(*                    closed v2 -> *)
+(*                    [x1:=v1]([x2:=v2]e) = [x2:=v2]([x1:=v1]e). *)
+(* Proof. *)
+(*   intros. *)
+(*   induction e; *)
+(*     simpl; *)
+(*     repeat string; simpl; *)
+(*     repeat string; eauto; *)
+(*     try closed_tac; eauto; *)
+(*     repeat string; eauto; *)
+(*     crush. *)
+(* Qed. *)
+
+(* Lemma sub_close: forall Σ x v e, *)
+(*                       closed v -> *)
+(*                       closed_env Σ -> *)
+(*                       close Σ ([x:=v]e) = [x:=v](close (drop x Σ) e). *)
+(* Proof. *)
+(*   intro Σ. *)
+(*   induction Σ; intros; simpl; repeat (simplify; string); eauto; *)
+(*   repeat string; simpl; *)
+(*   try solve[rewrite multi_subst; eauto; crush]; *)
+(*   try solve[rewrite swap_sub; crush]. *)
+(* Qed. *)
+
+(* Lemma multistep_App2 : forall v e e', *)
+(*                          value v -> *)
+(*                          multi step e e' -> *)
+(*                          multi step (App v e) (App v e'). *)
+(* Proof. *)
+(*   intros. *)
+(*   eapply multi_context with (e1 := e) (e2 := e'); eauto. *)
+(* Qed. *)
+
+(* Lemma sub_close_extend : *)
+(*   forall x v e Σ, *)
+(*     closed v -> *)
+(*     closed_env Σ -> *)
+(*     [x:=v](close (drop x Σ) e) = *)
+(*     close (extend (drop x Σ) x v) e. *)
+(* Proof. *)
+(*   intros. *)
+(*   generalize dependent e. *)
+(*   simpl. *)
+(*   induction Σ; intros; eauto; *)
+(*   simplify; *)
+(*   string; *)
+(*   simpl; try rewrite swap_sub; crush. *)
+(* Qed. *)
+
+(* Lemma drop_sub : forall Σ x v e, *)
+(*                    closed v -> *)
+(*                    closed_env Σ -> *)
+(*                    close (drop x Σ) ([x:=v]e) = *)
+(*                    close Σ ([x:=v]e). *)
+(* Proof. *)
+(*   intro Σ. *)
+(*   induction Σ; intros; *)
+(*   repeat string; iauto; simplify; string; simplify; simpl; *)
+(*   try solve [rewrite multi_subst; crush]; *)
+(*   try solve [rewrite swap_sub; crush]. *)
+(* Qed. *)
+
+(* Lemma extend_drop' : forall Σ (x:string) (v:exp) e, *)
+(*                        closed_env Σ -> *)
+(*                        closed v -> *)
+(*                        close (extend (drop x Σ) x v) e *)
+(*                        = close (cons (x,v) Σ) e. *)
+(* Proof. *)
+(*   induction Σ; intros; eauto; try (simplify; string; simplify); simpl; *)
+(*   try (simplify; string; simplify); simpl; *)
+(*   [rewrite drop_sub; eauto; *)
+(*    try solve [rewrite multi_subst; eauto; crush]; *)
+(*    crush *)
+(*   |rewrite swap_sub; crush]. *)
+(* Qed. *)
+
+(* Lemma lookup_mextend : forall (Γ : list (string * ty)) x x0 t, *)
+(*                         x <> x0 -> *)
+(*                         lookup ((x, t) :: Γ) x0 = *)
+(*                         lookup (mextend (cons (x, t) nil) Γ) x0. *)
+(* Proof. *)
+(*   intros. *)
+(*   simpl. *)
+(*   string; iauto. *)
+(*   induction Γ; try solve [crush]; *)
+(*   repeat (simpl; string; iauto). *)
+(* Qed. *)
+
+
+(* Lemma close_app : forall Σ e1 e2, *)
+(*                     close Σ (App e1 e2) = *)
+(*                     App (close Σ e1) (close Σ e2). *)
+(* Proof. *)
+(*   intro Σ. *)
+(*   induction Σ; simpl; intuition. *)
+(* Qed. *)
+
+(* Lemma close_if : forall Σ e1 e2 e3, *)
+(*                     close Σ (If e1 e2 e3) = *)
+(*                     If (close Σ e1) (close Σ e2) (close Σ e3). *)
+(* Proof. *)
+(*   intro Σ. *)
+(*   induction Σ; simpl; intuition. *)
+(* Qed. *)
+
+(* Lemma drop_fulfills : forall Γ Σ x, *)
+(*                         Γ |= Σ -> *)
+(*                         drop x Γ |= drop x Σ. *)
+(* Proof. *)
+(*   hint fulfills_drop. *)
+(*   intros. *)
+(*   induction H; eauto. *)
+(* Qed. *)
+
+(* Lemma close_pair : forall Σ e1 e2, *)
+(*                     close Σ (Pair e1 e2) = *)
+(*                     Pair (close Σ e1) (close Σ e2). *)
+(* Proof. *)
+(*   intro Σ. *)
+(*   induction Σ; simpl; intuition. *)
+(* Qed. *)
 
 (**************************************)
 (**** 7. ANTI-REDUCTION/DETERMINISM ***)
@@ -1016,29 +967,82 @@ Qed.
     but the definition of halting would probably need
     to change, and since STLC is deterministic, it's a
     reasonable property to check.
-*)
+ *)
 
+
+Lemma lt_1 : forall x, x < 1 -> x = 0.
+Proof.
+  intros. omega.
+Qed.
+
+(* Lemma ty_ren Γ a T, *)
+(*   Γ ||- a T -> forall Δ xi, *)
+(*   Γ = xi ++ Δ -> *)
+(*   Δ ||- s.[ren xi] A. *)
+
+Lemma closes : forall Γ Σ Δ e t,
+    Γ |= Σ ->
+    (Γ ++ Δ) ||- e t ->
+    Δ ||- e.[Σ] t.
+Proof.
+  intros Γ.
+  induction Γ; intros.
+  - simpl in *. invert H. autosubst.
+  - simpl in *. invert H.
+
+    Lemma tttt : forall v t Γ e t',
+        nil ||- v t -> (t::Γ) ||- e t' -> Γ ||- e.[v/] t'.
+    Admitted.
+    apply sn_types in H3.
+    pose proof (tttt H3 H0).
+    apply (IHΓ (ids 0 .: Σ0)) in H.
+    Focus 2. 
+
+
+    Lemma yyyy : forall e x ys, e.[x/].[ids 0 .: ys] = e.[x .: ys].
+    Proof.
+    Admitted.
+
+
+
+    (Γ ++ Δ) |= e[x0/] t
+
+Lemma type_sub : forall v t t1 e, 
+    (nil ||- v) t1 ->
+    ((t1 :: nil) ||- e) t ->
+    (nil ||- e.[v/]) t.
+Proof.
+  intros.
+  invert H0.
+  - autosubst.
+  - simpl in *. apply lt_1 in H1. subst. simpl. eauto.
+  - simpl in *. 
+    apply nth_error_singleton in H1. subst
 
 
 Lemma preservation_prim_step : forall e1 e2 t,
-                                 nil |-- e1 t ->
+                                 nil ||- e1 t ->
                                  step_prim e1 e2 ->
-                                 nil |-- e2 t.
+                                 nil ||- e2 t.
 Proof.
   intros.
   step_prim; subst; eauto;
-  has_type; subst; eauto;
+    has_type; subst; eauto.
+
+  invert H4.
+  
+
   eapply substitution_preserves_typing; eauto;
   match goal with
-    |[H: (nil |-- _) (Fun _ _) |- _] => inversion H
+    |[H: (nil ||- _) (Fun _ _) |- _] => inversion H
   end;
   subst; eauto.
 Qed.
 
 
 Lemma unique_typing : forall e Γ t t',
-                        Γ |-- e t ->
-                        Γ |-- e t' ->
+                        Γ ||- e t ->
+                        Γ ||- e t' ->
                         t = t'.
 Proof.
   hint lookup_same.
@@ -1053,12 +1057,12 @@ Proof.
 Qed.
 
 Lemma preservation_plug : forall C e1 e2 e1' e2' t t',
-                            nil |-- e1' t ->
-                            nil |-- e1 t' ->
-                            nil |-- e2 t' ->
+                            nil ||- e1' t ->
+                            nil ||- e1 t' ->
+                            nil ||- e2 t' ->
                             plug C e1 e1' ->
                             plug C e2 e2' ->
-                            nil |-- e2' t.
+                            nil ||- e2' t.
 Proof.
   intro C.
   induction C; intros.
@@ -1069,23 +1073,23 @@ Proof.
   all: repeat plug; has_type; eauto 3.
 Qed.
 
-Lemma preservation_step : forall e1 e2 t, nil |-- e1 t ->
+Lemma preservation_step : forall e1 e2 t, nil ||- e1 t ->
                                      step e1 e2 ->
-                                     nil |-- e2 t.
+                                     nil ||- e2 t.
 Proof.
   hint preservation_plug, preservation_prim_step.
   intros.
   inversion H0; subst.
   match goal with
-    |[H1: (_ |-- ?e) _, H2: plug C _ ?e |- _] =>
+    |[H1: (_ ||- ?e) _, H2: plug C _ ?e |- _] =>
      destruct (typed_hole H1 H2)
   end;
   eauto.
 Qed.
 
 Lemma preservation : forall e1 e2 t, multi step e1 e2 ->
-                                nil |-- e1 t ->
-                                nil |-- e2 t.
+                                nil ||- e1 t ->
+                                nil ||- e2 t.
 Proof.
   hint preservation_step.
   intros.
@@ -1095,7 +1099,7 @@ Qed.
 
 Lemma anti_reduct : forall e' e t, multi step e e' ->
                               SN t e' ->
-                              nil |-- e t ->
+                              nil ||- e t ->
                               SN t e.
 Proof.
   hint sn_typable_empty, @multi_trans.
@@ -1314,8 +1318,8 @@ Qed.
 
 Lemma TAbs_typing : forall Γ Σ x e t t',
                       Γ |= Σ ->
-                      (extend (drop x Γ) x t) |-- e t' ->
-                      nil |-- (Abs x t (close (drop x Σ) e)) (Fun t t').
+                      (extend (drop x Γ) x t) ||- e t' ->
+                      nil ||- (Abs x t (close (drop x Σ) e)) (Fun t t').
 Proof.
   hint lookup_drop, fulfills_drop.
   hint_rewrite string_dec_ne, string_dec_refl.
@@ -1351,7 +1355,7 @@ Qed.
 
 Lemma TAbs_compat : forall Γ Σ x e t t',
                       Γ |= Σ ->
-                      (extend (drop x Γ) x t) |-- e t' ->
+                      (extend (drop x Γ) x t) ||- e t' ->
                       (forall v, SN t v -> SN t' (close (extend (drop x Σ) x v) e)) ->
                       SN (Fun t t') (close Σ (Abs x t e)).
 Proof.
@@ -1384,7 +1388,7 @@ Qed.
 
 Lemma TIf_const : forall t b e1 e2 e3, SN t e2 ->
                                   SN t e3 ->
-                                  nil |-- e1 Bool ->
+                                  nil ||- e1 Bool ->
                                   multi step e1 (Const b) ->
                                   SN t (If e1 e2 e3).
 Proof.
@@ -1417,14 +1421,14 @@ Proof.
 
   (* We first figure out if the test expression evaluates to true or false. *) 
   match goal with
-  |[H : (_ |-- ?e) Bool, H1 : halts ?e |- _] =>
+  |[H : (_ ||- ?e) Bool, H1 : halts ?e |- _] =>
    (* By figuring out the value that it runs to *)
      invert H1
   end; simplify;
   match goal with
   |[H0: value ?x, H1: multi step _ ?x |- _] =>
    (* And then using preservation to show that the value must be a bool. *)
-   assert (nil |-- x Bool) by (hint preservation; eauto);
+   assert (nil ||- x Bool) by (hint preservation; eauto);
      destruct x; eauto; try solve [has_type]; try solve [inversion H0]
   end; simplify.
 
@@ -1493,7 +1497,7 @@ Qed.
 *)
 
 Theorem fundamental : forall e t Γ Σ,
-                        Γ |-- e t ->
+                        Γ ||- e t ->
                             Γ |= Σ ->
                             SN t (close Σ e).
 Proof.
@@ -1506,10 +1510,14 @@ Proof.
 Qed.
 
 Theorem strong_normalization : forall e t,
-                                 nil |-- e t ->
+                                 nil ||- e t ->
                                  halts e.
 Proof.
   hint fundamental, sn_halts.
   intros.
   assert (SN t (close nil e)); eauto.
 Qed.
+
+(* Local Variables: *)
+(* company-coq-local-symbols: (("|=" . ?⊨) ("||-" . ?⊩)) *)
+(* End: *)
